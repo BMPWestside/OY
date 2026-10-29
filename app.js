@@ -797,14 +797,14 @@ async function unlockSuccess(res) {
   const screen = document.querySelector('.unlock-screen');
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (screen && !reduce) {
-    buzz([10, 60, 25]);
-    screen.classList.add('opening');                 // keyhole turns, "Only You" → "Can See"
-    await new Promise((r) => setTimeout(r, 750));
-    const doors = vaultDoors();                      // freeze the lock screen into two doors…
-    state.noAnim = true; go('vault');                // …build the vault behind them…
-    requestAnimationFrame(() => requestAnimationFrame(() => doors.classList.add('open'))); // …and swing them apart
-    buzz(14);
-    setTimeout(() => doors.remove(), 1000);
+    screen.classList.add('opening');                 // dial spins the combination, "Only You" → "Can See"
+    buzz(8); setTimeout(() => buzz(8), 330); setTimeout(() => buzz(8), 560); setTimeout(() => buzz([6, 40, 18]), 820);
+    await new Promise((r) => setTimeout(r, 1000));
+    const panel = liftPanel();                       // freeze the lock screen…
+    state.noAnim = true; go('vault');                // …build the vault behind it…
+    document.querySelector('.home-grid')?.classList.add('settle');
+    requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add('up'))); // …and lift it away
+    setTimeout(() => panel.remove(), 800);
   } else {
     if (screen) { screen.classList.add('opening'); await new Promise((r) => setTimeout(r, 400)); }
     go('vault');
@@ -814,43 +814,59 @@ async function unlockSuccess(res) {
   if (isDrive() && S.hasToken() && state.sync !== 'saved') save();
 }
 
-// Vault doors: the lock screen splits down the middle and slides open, left and right.
-function vaultDoors() {
+// The lock screen as a single panel that lifts away, revealing the vault built behind it
+function liftPanel() {
   const bg = document.querySelector('.glow-backdrop');
   const banner = document.querySelector('.preview-banner');
-  const half = (side) => {
-    const inner = h('div', { class: 'door-inner' });
-    if (bg && getComputedStyle(bg).display !== 'none') { const b = bg.cloneNode(true); b.classList.add('door-bg'); inner.append(b); }
-    if (banner) inner.append(banner.cloneNode(true));
-    const a = app.cloneNode(true); a.removeAttribute('id'); a.className = 'door-app';
-    a.querySelectorAll('.intro').forEach((el) => el.classList.remove('intro'));
-    a.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
-    inner.append(a);
-    return h('div', { class: `door door-${side}` }, inner, h('span', { class: 'door-edge' }));
-  };
-  const doors = h('div', { class: 'doors', 'aria-hidden': 'true' }, half('l'), half('r'));
-  document.body.append(doors);
-  return doors;
+  const inner = h('div', { class: 'lift-inner' });
+  if (bg && getComputedStyle(bg).display !== 'none') { const b = bg.cloneNode(true); b.classList.add('door-bg'); inner.append(b); }
+  if (banner) inner.append(banner.cloneNode(true));
+  const a = app.cloneNode(true); a.removeAttribute('id'); a.className = 'door-app';
+  a.querySelectorAll('.intro').forEach((el) => el.classList.remove('intro'));
+  a.querySelectorAll('[id]').forEach((el) => { if (!el.closest('svg')) el.removeAttribute('id'); }); // keep SVG gradients
+  inner.append(a);
+  const panel = h('div', { class: 'lift', 'aria-hidden': 'true' }, inner, h('span', { class: 'lift-edge' }));
+  document.body.append(panel);
+  return panel;
 }
 
-// The unlock button: a gold keyhole. On success it turns like a key, fills with light,
-// and you fly through it into the vault.
+// Safe combination dial: fixed knurled rim + pointer, a numbered face that spins, a centre knob with a grip
+function safeDialSvg() {
+  let ticks = '', nums = '', knurl = '';
+  for (let i = 0; i < 100; i++) {
+    const a = (i / 100) * 360, major = i % 10 === 0, mid = i % 5 === 0;
+    const r1 = major ? 62 : mid ? 66 : 69;
+    ticks += `<line x1="100" y1="${100 - 74}" x2="100" y2="${100 - r1}" transform="rotate(${a} 100 100)" class="${major ? 'dt-major' : 'dt'}"/>`;
+    if (major) nums += `<text x="100" y="${100 - 50}" transform="rotate(${a} 100 100)" class="dn">${i}</text>`;
+  }
+  for (let i = 0; i < 72; i++) knurl += `<rect x="98.6" y="3" width="2.8" height="9" rx="1.2" transform="rotate(${i * 5} 100 100)"/>`;
+  return `<svg viewBox="0 0 200 200" aria-hidden="true">
+    <defs>
+      <radialGradient id="dFace" cx=".42" cy=".35" r=".75"><stop offset="0" style="stop-color:var(--gold-hi)"/><stop offset=".6" style="stop-color:var(--gold)"/><stop offset="1" style="stop-color:color-mix(in srgb, var(--gold) 65%, #000)"/></radialGradient>
+      <radialGradient id="dKnob" cx=".4" cy=".32" r=".8"><stop offset="0" style="stop-color:var(--gold-hi)"/><stop offset="1" style="stop-color:color-mix(in srgb, var(--gold) 55%, #000)"/></radialGradient>
+      <linearGradient id="dRim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:color-mix(in srgb, var(--gold) 70%, #fff)"/><stop offset="1" style="stop-color:color-mix(in srgb, var(--gold) 45%, #000)"/></linearGradient>
+    </defs>
+    <circle cx="100" cy="100" r="97" fill="url(#dRim)"/>
+    <g class="d-knurl" fill="color-mix(in srgb, var(--gold) 40%, #000)" opacity=".55">${knurl}</g>
+    <circle cx="100" cy="100" r="86" fill="color-mix(in srgb, var(--gold) 35%, #000)"/>
+    <g class="d-face">
+      <circle cx="100" cy="100" r="82" fill="url(#dFace)"/>
+      <g class="d-ticks">${ticks}</g>
+      <g class="d-nums">${nums}</g>
+      <circle cx="100" cy="100" r="36" fill="url(#dKnob)" stroke="color-mix(in srgb, var(--gold) 50%, #000)" stroke-width="1.5"/>
+      <rect x="68" y="93" width="64" height="14" rx="7" fill="url(#dFace)" stroke="color-mix(in srgb, var(--gold) 45%, #000)" stroke-width="1.5"/>
+      <circle cx="100" cy="100" r="5" fill="color-mix(in srgb, var(--gold) 45%, #000)"/>
+    </g>
+    <path class="d-pointer" d="M100 14 l-7 -11 h14 z"/>
+  </svg>`;
+}
+
+// The unlock button: a safe combination dial
 function bigLock() {
   ensureIconDefs();
   const wrap = document.createElement('span');
-  wrap.className = 'big-lock-art';
-  wrap.innerHTML = `<svg viewBox="0 0 100 140" aria-hidden="true">
-    <defs>
-      <radialGradient id="khLight" cx=".5" cy=".38" r=".7"><stop offset="0" stop-color="#fff"/><stop offset=".45" style="stop-color:var(--gold-hi)"/><stop offset="1" style="stop-color:var(--gold)"/></radialGradient>
-      <linearGradient id="khDepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity=".55"/><stop offset="1" stop-color="#000" stop-opacity=".85"/></linearGradient>
-    </defs>
-    <g class="kh">
-      <path class="kh-rim" d="M50 6a30 30 0 0 0-16.5 55L24 130h52l-9.5-69A30 30 0 0 0 50 6z" fill="url(#oyLogo)"/>
-      <path class="kh-depth" d="M50 18a18 18 0 0 0-10 33L33 120h34l-7-69A18 18 0 0 0 50 18z" fill="url(#khDepth)"/>
-      <path class="kh-light" d="M50 18a18 18 0 0 0-10 33L33 120h34l-7-69A18 18 0 0 0 50 18z" fill="url(#khLight)"/>
-      <path class="kh-shine" d="M38 22a20 20 0 0 1 14-6" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/>
-    </g>
-  </svg>`;
+  wrap.className = 'big-lock-art dial-art';
+  wrap.innerHTML = safeDialSvg();
   return wrap;
 }
 
@@ -1170,10 +1186,10 @@ VIEWS.vault = () => {
   const listView = homeView() === 'list';
   let order = arranging ? state.arranging : homeOrder();
 
-  const tile = (k) => {
+  const tile = (k, n) => {
     let pressTimer;
     const el = h('button', {
-      class: `home-tile ${counts[k] ? 'has' : ''} ${arranging ? 'wiggle' : ''}`, 'data-key': k,
+      class: `home-tile ${counts[k] ? 'has' : ''} ${arranging ? 'wiggle' : ''}`, 'data-key': k, style: `--n:${n || 0}`,
       'aria-label': `${k === 'more' ? 'More' : SPECIAL[k] || TYPES[k].label}${counts[k] ? `, ${counts[k]} saved` : ''}`,
       onclick: () => {
         if (!state.arranging && !el.dataset.longpressed) { if (k === 'more') openMore(); else go('category', { category: k, from: null, query: '' }); }

@@ -924,3 +924,34 @@ body.is-home .home-grid.as-list { grid-template-rows: repeat(var(--rows, 12), mi
 .doors.open .door-l { transform: translateX(-102%); }
 .doors.open .door-r { transform: translateX(102%); }
 .door { box-shadow: 0 0 40px rgba(0, 0, 0, .5); }
+
+/* ---------- Safe dial unlock ---------- */
+.big-lock { width: 184px; height: 184px; }
+.big-lock-art.dial-art { width: 150px; height: 150px; filter: drop-shadow(0 10px 18px rgba(0,0,0,.45)) drop-shadow(0 0 14px color-mix(in srgb, var(--gold) 25%, transparent)); }
+.dial-art svg { width: 100%; height: 100%; overflow: visible; }
+.d-face { transform-box: view-box; transform-origin: 100px 100px; }
+.dt { stroke: color-mix(in srgb, var(--gold) 35%, #000); stroke-width: .9; }
+.dt-major { stroke: color-mix(in srgb, var(--gold) 25%, #000); stroke-width: 1.8; }
+.dn { font: 700 10.5px/1 var(--font-body); fill: color-mix(in srgb, var(--gold) 25%, #000); text-anchor: middle; dominant-baseline: middle; }
+.d-pointer { fill: var(--fg); filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
+.big-lock::before { inset: -8px; }
+/* idle: a gentle wobble now and then, like someone just touched it */
+.d-face { animation: dialIdle 6s ease-in-out infinite; }
+@keyframes dialIdle { 0%, 82%, 100% { transform: rotate(0deg); } 88% { transform: rotate(-9deg); } 94% { transform: rotate(4deg); } }
+/* success: right, left, right — then the screen lifts */
+.opening .d-face { animation: dialCombo .9s cubic-bezier(.35, .1, .25, 1) forwards; }
+@keyframes dialCombo { 0% { transform: rotate(0deg); } 36% { transform: rotate(250deg); } 62% { transform: rotate(120deg); } 88% { transform: rotate(186deg); } 100% { transform: rotate(180deg); } }
+.opening .big-lock { box-shadow: 0 0 0 1px var(--gold), 0 0 50px 6px color-mix(in srgb, var(--gold) 40%, transparent); transition: box-shadow .4s ease .6s; }
+.opening .big-lock::before { animation: none; opacity: 0; }
+.door-app .d-face { transform: rotate(180deg); }
+.shake .d-face { animation: dialNo .45s ease; }
+@keyframes dialNo { 25% { transform: rotate(-14deg); } 60% { transform: rotate(10deg); } 100% { transform: rotate(0deg); } }
+/* lift-away panel */
+.lift { position: fixed; inset: 0; z-index: 60; pointer-events: none; overflow: hidden; background: var(--bg);
+  transition: transform .7s cubic-bezier(.7, 0, .2, 1); will-change: transform; box-shadow: 0 20px 40px rgba(0,0,0,.5); }
+.lift-inner { position: absolute; inset: 0; }
+.lift.up { transform: translateY(-104%); }
+.lift-edge { position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold-hi) 25%, var(--gold-hi) 75%, transparent); box-shadow: 0 0 18px 3px color-mix(in srgb, var(--gold) 60%, transparent); }
+.home-grid.settle .home-tile { animation: settle .55s cubic-bezier(.2, .9, .3, 1.15) both; animation-delay: calc(.2s + var(--n, 0) * 25ms); }
+@keyframes settle { from { transform: translateY(26px); opacity: .25; } }
