@@ -2145,6 +2145,7 @@ VIEWS.settings = () => {
 if (!PREVIEW && 'serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
+if (PREVIEW) document.body.classList.add('preview');
 applyTheme(savedTheme());
 applyIconStyle(savedIconStyle());
 applyGlass(savedGlass());

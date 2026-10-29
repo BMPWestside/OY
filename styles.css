@@ -955,3 +955,16 @@ body.is-home .home-grid.as-list { grid-template-rows: repeat(var(--rows, 12), mi
   background: linear-gradient(90deg, transparent, var(--gold-hi) 25%, var(--gold-hi) 75%, transparent); box-shadow: 0 0 18px 3px color-mix(in srgb, var(--gold) 60%, transparent); }
 .home-grid.settle .home-tile { animation: settle .55s cubic-bezier(.2, .9, .3, 1.15) both; animation-delay: calc(.2s + var(--n, 0) * 25ms); }
 @keyframes settle { from { transform: translateY(26px); opacity: .25; } }
+
+/* ---------- Room for the iPhone status bar (installed app) ---------- */
+/* The page starts below the status bar, so the sticky header never covers the first field. */
+html { --safe-top: env(safe-area-inset-top, 0px); }
+body:not(.preview) { padding-top: var(--safe-top); }
+body:not(.preview) #app { min-height: calc(100dvh - var(--safe-top)); }
+body:not(.preview) .screen { min-height: calc(100dvh - var(--safe-top)); }
+body:not(.preview) .unlock-screen { min-height: calc(100dvh - var(--safe-top)); }
+body:not(.preview) .lift-inner .door-app { padding-top: var(--safe-top); }
+/* the band behind the status bar stays solid, even with the glass look */
+[data-glass="on"] body::before { background: color-mix(in srgb, var(--bg) 82%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
+/* when a field is focused, keep it clear of the sticky header */
+.input, textarea { scroll-margin-top: calc(var(--safe-top) + 84px); }
