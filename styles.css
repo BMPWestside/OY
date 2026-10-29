@@ -485,15 +485,15 @@ body.is-home .reset-order { flex: none; margin: 0 0 10px; }
 }
 @keyframes ring { 0% { transform: scale(.92); opacity: .55; } 100% { transform: scale(1.18); opacity: 0; } }
 .big-lock:active { transform: scale(.96); }
-.big-lock-art { width: 86px; height: 100px; display: block; filter: drop-shadow(0 6px 12px color-mix(in srgb, var(--gold) 35%, transparent)); }
+
 .big-lock-art svg { width: 100%; height: 100%; overflow: visible; }
-.big-lock .keyhole { fill: var(--surface); }
-.big-lock .shackle { transform-box: view-box; transform-origin: 86px 64px; transition: transform .55s cubic-bezier(.3, 1.6, .5, 1); }
+
+
 .lock-hint { color: var(--muted); font-size: .95rem; min-height: 1.5em; }
 .unlock-panel { width: 100%; max-width: 360px; display: grid; gap: 12px; animation: rise .25s ease; }
-.opening .big-lock .shackle { transform: translateY(-16px) rotate(28deg); }
+
 .opening .big-lock::before { animation: none; }
-.opening .big-lock { animation: glow 1.2s ease forwards; }
+
 .opening .lock-hint { opacity: 0; }
 @keyframes glow { 40% { box-shadow: 0 0 0 1px var(--gold), 0 0 60px 6px color-mix(in srgb, var(--gold) 55%, transparent); } 100% { box-shadow: 0 0 0 1px var(--gold), 0 0 90px 10px color-mix(in srgb, var(--gold) 25%, transparent); transform: scale(1.04); } }
 .shake { animation: shake .45s ease; }
@@ -869,3 +869,29 @@ body.is-home .home-grid.as-list { grid-template-rows: repeat(var(--rows, 12), mi
 [data-icons="colour"] .home-badge { background: #fff; color: #111; }
 .home-grid.as-list .home-badge { display: none; }
 .name-input { width: 52%; padding: 9px 12px; text-align: right; }
+
+/* ---------- Keyhole unlock ---------- */
+.big-lock { overflow: visible; }
+.big-lock-art { width: 70px; height: 98px; display: block; position: relative; z-index: 2;
+  filter: drop-shadow(0 8px 16px color-mix(in srgb, var(--gold) 35%, transparent)); }
+.big-lock-art svg { width: 100%; height: 100%; overflow: visible; }
+.kh { transform-box: view-box; transform-origin: 50px 52px; }
+.kh-light { opacity: 0; }
+/* idle: a slow warm glow breathing inside the keyhole */
+.kh-light { animation: khIdle 3.2s ease-in-out infinite; }
+@keyframes khIdle { 0%, 100% { opacity: 0; } 50% { opacity: .18; } }
+/* success: turn like a key → fill with light → fly through */
+.opening .kh { animation: khTurn .5s cubic-bezier(.5, 0, .3, 1.5) forwards; }
+.opening .kh-light { animation: khFill .35s ease .45s forwards; }
+.opening .big-lock-art { animation: khThrough .8s cubic-bezier(.7, 0, .9, .4) .85s forwards; }
+.opening .big-lock { animation: khDisc 1.6s ease forwards; }
+.opening .unlock-foot, .opening .lock-hint, .opening .unlock-panel { transition: opacity .3s ease; opacity: 0; }
+.opening .unlock-top { animation: fadeAway .5s ease 1.05s forwards; }
+@keyframes khTurn { 0% { transform: none; } 100% { transform: rotate(90deg); } }
+@keyframes khFill { from { opacity: 0; } to { opacity: 1; } }
+@keyframes khThrough { 0% { transform: none; filter: drop-shadow(0 0 30px var(--gold-hi)); }
+  100% { transform: scale(26); opacity: 0; filter: drop-shadow(0 0 60px var(--gold-hi)); } }
+@keyframes khDisc { 0% { } 30% { box-shadow: 0 0 0 1px var(--gold), 0 0 60px 8px color-mix(in srgb, var(--gold) 50%, transparent); }
+  60%, 100% { box-shadow: 0 0 0 1px transparent, 0 0 90px 30px color-mix(in srgb, var(--gold) 40%, transparent); background: transparent; } }
+@keyframes fadeAway { to { opacity: 0; transform: translateY(-10px); } }
+.unlock-screen { overflow: hidden; }

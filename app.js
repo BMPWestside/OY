@@ -747,21 +747,29 @@ async function unlockSuccess(res) {
     buzz([10, 60, 25]);
     screen.classList.add('opening');
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    await new Promise((r) => setTimeout(r, reduce ? 500 : 1500));
+    await new Promise((r) => setTimeout(r, reduce ? 500 : 1650));
   }
   go('vault'); resetIdle();
   if (state.sync === 'pending') save();
 }
 
+// The unlock button: a gold keyhole. On success it turns like a key, fills with light,
+// and you fly through it into the vault.
 function bigLock() {
   ensureIconDefs();
   const wrap = document.createElement('span');
   wrap.className = 'big-lock-art';
-  wrap.innerHTML = `<svg viewBox="0 0 120 140" aria-hidden="true">
-    <path class="shackle" d="M34 64V44a26 26 0 0 1 52 0v20" fill="none" stroke="url(#oyLockStroke)" stroke-width="10" stroke-linecap="round"/>
-    <rect x="16" y="62" width="88" height="70" rx="16" fill="url(#oyLockBody)" stroke="url(#oyLockStroke)" stroke-width="3"/>
-    <rect x="22" y="66" width="76" height="22" rx="10" fill="#fff" opacity=".12"/>
-    <path d="M60 86a9 9 0 0 0-4.5 16.8V114h9v-11.2A9 9 0 0 0 60 86z" class="keyhole"/>
+  wrap.innerHTML = `<svg viewBox="0 0 100 140" aria-hidden="true">
+    <defs>
+      <radialGradient id="khLight" cx=".5" cy=".38" r=".7"><stop offset="0" stop-color="#fff"/><stop offset=".45" style="stop-color:var(--gold-hi)"/><stop offset="1" style="stop-color:var(--gold)"/></radialGradient>
+      <linearGradient id="khDepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity=".55"/><stop offset="1" stop-color="#000" stop-opacity=".85"/></linearGradient>
+    </defs>
+    <g class="kh">
+      <path class="kh-rim" d="M50 6a30 30 0 0 0-16.5 55L24 130h52l-9.5-69A30 30 0 0 0 50 6z" fill="url(#oyLogo)"/>
+      <path class="kh-depth" d="M50 18a18 18 0 0 0-10 33L33 120h34l-7-69A18 18 0 0 0 50 18z" fill="url(#khDepth)"/>
+      <path class="kh-light" d="M50 18a18 18 0 0 0-10 33L33 120h34l-7-69A18 18 0 0 0 50 18z" fill="url(#khLight)"/>
+      <path class="kh-shine" d="M38 22a20 20 0 0 1 14-6" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/>
+    </g>
   </svg>`;
   return wrap;
 }
