@@ -691,7 +691,7 @@ VIEWS.welcome = () => {
           h('span', { class: 'g' }, 'G'), google ? 'Use a different Google account' : 'Sign in with Google'),
       !S.driveConfigured && !PREVIEW && h('button', { class: 'btn gold big', onclick: startLocal }, 'Get started'),
       PREVIEW && h('button', { class: 'btn gold big', onclick: startSample }, 'Explore with sample data')),
-    h('button', { class: 'btn link subtle welcome-restore', onclick: () => restoreBackup() }, 'Restore from a backup file'));
+    !PREVIEW && h('button', { class: 'btn link subtle welcome-restore', onclick: () => restoreBackup() }, 'Restore from a backup file'));
 };
 function isDriveText() { return S.driveConfigured ? 'Stored in your own Google Drive, not on our servers' : 'Stored only on your device'; }
 
