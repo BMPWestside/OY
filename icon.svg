@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#08152b"/>
-  <circle cx="256" cy="256" r="196" fill="none" stroke="#d9ad4b" stroke-width="10" opacity=".35"/>
-  <text x="248" y="318" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="190" letter-spacing="-8" fill="#d9ad4b">OY</text>
-  <rect x="402" y="150" width="30" height="128" rx="12" fill="#eef2f9"/>
-  <circle cx="417" cy="306" r="17" fill="#eef2f9"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs><linearGradient id="t" x1="0" y1="0" x2=".6" y2="1"><stop offset="0" stop-color="#8ce7ee"/><stop offset=".5" stop-color="#1aa3b2"/><stop offset="1" stop-color="#0d6e7a"/></linearGradient><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b3d49"/><stop offset="1" stop-color="#031a21"/></linearGradient><radialGradient id="glow" cx=".5" cy=".38" r=".6"><stop offset="0" stop-color="#4fd0db" stop-opacity=".2"/><stop offset="1" stop-color="#4fd0db" stop-opacity="0"/></radialGradient></defs><rect width="512" height="512" rx="112" fill="url(#bg)"/><rect width="512" height="512" rx="112" fill="url(#glow)"/><g transform="translate(256 256) scale(.86) translate(-276 -256)"><circle cx="168" cy="256" r="106" fill="url(#t)"/><circle cx="168" cy="232" r="30" fill="#052a33"/><path d="M153 246 h30 l12 66 h-54z" fill="#052a33"/><path d="M276 170 L336 256 L396 170 M336 256 V342" fill="none" stroke="url(#t)" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/><rect x="434" y="170" width="36" height="120" rx="18" fill="url(#t)"/><circle cx="452" cy="326" r="20" fill="url(#t)"/></g></svg>

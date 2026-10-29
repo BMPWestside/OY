@@ -138,6 +138,8 @@ function ensureIconDefs() {
       <stop offset="0" style="stop-color:var(--gold-hi)"/><stop offset="1" style="stop-color:var(--gold)"/></linearGradient>
     <linearGradient id="oyFill" gradientUnits="userSpaceOnUse" x1="4" y1="3" x2="20" y2="21">
       <stop offset="0" style="stop-color:var(--gold-hi);stop-opacity:.6"/><stop offset="1" style="stop-color:var(--gold);stop-opacity:.22"/></linearGradient>
+    <linearGradient id="oyLogo" x1="0" y1="0" x2=".6" y2="1">
+      <stop offset="0" style="stop-color:var(--gold-hi)"/><stop offset=".55" style="stop-color:var(--gold)"/><stop offset="1" style="stop-color:color-mix(in srgb, var(--gold) 78%, #000)"/></linearGradient>
     <linearGradient id="oyChip" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6dc95"/><stop offset=".5" stop-color="#d7ad4e"/><stop offset="1" stop-color="#f3d488"/></linearGradient>
     <linearGradient id="oyLockStroke" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" style="stop-color:var(--gold-hi)"/><stop offset="1" style="stop-color:var(--gold)"/></linearGradient>
@@ -199,9 +201,23 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
+// The OY! mark: solid O with a keyhole, Y and !, drawn in the theme's accent colours
+function logoMark() {
+  ensureIconDefs();
+  const span = document.createElement('span');
+  span.className = 'logo-mark';
+  span.setAttribute('aria-hidden', 'true');
+  span.innerHTML = `<svg viewBox="68 160 360 178"><g transform="translate(256 256) scale(.86) translate(-276 -256)">
+    <circle cx="168" cy="256" r="106" fill="url(#oyLogo)"/>
+    <circle cx="168" cy="232" r="30" class="logo-hole"/><path d="M153 246 h30 l12 66 h-54z" class="logo-hole"/>
+    <path d="M276 170 L336 256 L396 170 M336 256 V342" fill="none" stroke="url(#oyLogo)" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="434" y="170" width="36" height="120" rx="18" fill="url(#oyLogo)"/><circle cx="452" cy="326" r="20" fill="url(#oyLogo)"/>
+  </g></svg>`;
+  return span;
+}
 function logo(size = 'md') {
   return h('div', { class: `logo logo-${size}`, 'aria-label': 'OY! Only You' },
-    h('span', { class: 'logo-mark' }, 'OY', h('span', { class: 'logo-bang' }, '!')),
+    logoMark(),
     size !== 'sm' && h('span', { class: 'logo-sub' },
       h('span', { class: 'sub-a' }, 'Only You'), h('span', { class: 'sub-b', 'aria-hidden': 'true' }, 'Can See')));
 }
