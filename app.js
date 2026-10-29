@@ -677,26 +677,20 @@ const VIEWS = {};
 
 VIEWS.welcome = () => {
   const remembered = S.rememberedAccount();
-  return h('main', { class: 'center-screen' },
+  const google = remembered && remembered.id !== 'local' ? remembered : null;
+  return h('main', { class: 'center-screen welcome' },
     logo('lg'),
-    h('p', { class: 'tagline' }, 'Your passwords, cards and IDs — locked so only you can open them.'),
-    h('div', { class: 'stack' },
-      remembered && remembered.id !== 'local' && S.driveConfigured &&
-        h('button', { class: 'btn gold big', onclick: () => (S.hasToken() ? openDrive(remembered) : startDrive(remembered.email)) }, `Continue as ${remembered.email}`),
+    h('div', { class: 'stack welcome-actions' },
+      google && S.driveConfigured &&
+        h('button', { class: 'btn gold big', onclick: () => (S.hasToken() ? openDrive(google) : startDrive(google.email)) }, `Continue as ${google.email}`),
       remembered && remembered.id === 'local' &&
         h('button', { class: 'btn gold big', onclick: startLocal }, 'Open my vault on this device'),
       S.driveConfigured &&
         h('button', { class: `btn ${remembered ? 'outline' : 'gold'} big`, onclick: () => startDrive() },
-          h('span', { class: 'g' }, 'G'), remembered && remembered.id !== 'local' ? 'Use a different Google account' : 'Sign in with Google'),
-      (!remembered || remembered.id !== 'local') &&
-        h('button', { class: 'btn outline big', onclick: startLocal }, 'Use on this device only'),
-      PREVIEW && h('button', { class: 'btn gold big', onclick: startSample }, 'Explore with sample data'),
-      h('button', { class: 'btn link', onclick: () => restoreBackup() }, 'Restore from a backup file')),
-    h('ul', { class: 'promises' },
-      h('li', {}, 'Encrypted on your device before it is saved'),
-      h('li', {}, isDriveText()),
-      h('li', {}, 'Nobody else — not even the app maker — can read it')),
-    !S.driveConfigured && !PREVIEW && h('p', { class: 'note' }, 'Google sync is not switched on yet, so vaults stay on this device.'));
+          h('span', { class: 'g' }, 'G'), google ? 'Use a different Google account' : 'Sign in with Google'),
+      !S.driveConfigured && !PREVIEW && h('button', { class: 'btn gold big', onclick: startLocal }, 'Get started'),
+      PREVIEW && h('button', { class: 'btn gold big', onclick: startSample }, 'Explore with sample data')),
+    h('button', { class: 'btn link subtle welcome-restore', onclick: () => restoreBackup() }, 'Restore from a backup file'));
 };
 function isDriveText() { return S.driveConfigured ? 'Stored in your own Google Drive, not on our servers' : 'Stored only on your device'; }
 
@@ -1500,8 +1494,7 @@ async function deleteCategory(c) {
 
 // ---------- Category list ----------
 // ---------- Vault health ----------
-function vaultHealth() {
-  const items = state.data.items;
+function vaultHealth(items = state.data.items) {
   const pw = items.map((it) => ({ it, hl: health(it) })).filter((x) => x.hl);
   const weak = pw.filter((x) => x.hl.label === 'Weak').map((x) => x.it);
   const reused = pw.filter((x) => x.hl.label === 'Reused').map((x) => x.it);
@@ -1535,13 +1528,23 @@ function homeHeader() {
     scoreRing(vh.score, 30),
     h('span', { class: 'hs-text' }, h('b', {}, `Vault health ${vh.score}%`), h('span', {}, vh.toFix ? ` · ${vh.toFix} to fix` : ' · All good')),
     h('span', { class: 'home-chev' }, '›'));
-  if (!name && !strip) return null;
+  if (!name) return null;
   return h('div', { class: 'home-head' },
-    name && h('p', { class: 'greeting' }, `${hello}, `, h('span', {}, name)),
-    strip);
+    name && h('p', { class: 'greeting' }, `${hello}, `, h('span', {}, name)));
+}
+function healthCard(items, cat) {
+  const vh = vaultHealth(items);
+  if (!vh.checks) return null;
+  const bits = [vh.weak.length && `${vh.weak.length} weak`, vh.reused.length && `${vh.reused.length} reused`, vh.expiring.length && `${vh.expiring.length} expiring`].filter(Boolean);
+  return h('button', { class: `health-strip ${vh.score >= 80 ? 'good' : vh.score >= 50 ? 'mid' : 'bad'}`,
+    onclick: () => go('category', { category: 'health', healthCat: cat, healthTab: null, from: null }) },
+    scoreRing(vh.score, 30),
+    h('span', { class: 'hs-text' }, h('b', {}, `Health ${vh.score}%`), h('span', {}, bits.length ? ` · ${bits.join(' · ')}` : ' · All good')),
+    h('span', { class: 'home-chev' }, '›'));
 }
 function healthView() {
-  const vh = vaultHealth();
+  const cat = state.healthCat;
+  const vh = vaultHealth(cat && cat !== 'all' ? state.data.items.filter((it) => it.type === cat) : state.data.items);
   const tab = state.healthTab || (vh.weak.length ? 'weak' : vh.reused.length ? 'reused' : 'expiring');
   const lists = { weak: vh.weak, reused: vh.reused, expiring: vh.expiring };
   const card = (key, label, ic, note) => h('button', { class: `hcard ${tab === key ? 'on' : ''} ${lists[key].length ? 'has' : ''}`,
@@ -1551,7 +1554,7 @@ function healthView() {
   const rows = lists[tab];
   const tips = { weak: 'Open each one, tap Edit, then Generate a new password.', reused: 'Give each account its own password, so one leak can’t unlock the others.', expiring: 'Renew these, then update the expiry date here.' };
   return h('div', { class: 'screen' },
-    topBar('Vault health', iconBtn('back', 'Back', () => go('vault')), null),
+    topBar(cat && cat !== 'all' ? `${typeDef(cat).label} health` : 'Vault health', iconBtn('back', 'Back', () => go('category', { category: cat || 'all' })), null),
     h('div', { class: 'content' },
       h('div', { class: 'health-hero' }, scoreRing(vh.score, 150),
         h('p', { class: 'health-verdict' }, verdict),
@@ -1561,7 +1564,7 @@ function healthView() {
         card('reused', 'Reused', 'copy', 'Same password twice'),
         card('expiring', 'Expiring', 'expiring', 'Within 3 months')),
       rows.length
-        ? [h('p', { class: 'tap-hint left' }, tips[tab]), h('ul', { class: 'list' }, rows.map((it) => itemRow(it, { showCat: true, from: 'health' })))]
+        ? [h('p', { class: 'tap-hint left' }, tips[tab]), h('ul', { class: 'list' }, rows.map((it) => itemRow(it, { showCat: !cat || cat === 'all', from: 'health' })))]
         : h('div', { class: 'empty' }, h('p', { class: 'muted' }, tab === 'expiring' ? 'Nothing is expiring soon.' : `No ${tab} passwords. Nice work.`))));
 }
 
@@ -1573,18 +1576,41 @@ VIEWS.category = () => {
   const custom = customCats().find((c) => c.id === k);
   const rows = state.data.items.filter((it) => it.type === k)
     .sort((a, b) => (b.fav ? 1 : 0) - (a.fav ? 1 : 0) || a.title.localeCompare(b.title));
-  const add = () => go('edit', { itemId: null, draft: { id: uid(), type: k, title: '', fav: false, fields: {}, files: [] } });
+  const add = () => showFact(() => go('edit', { itemId: null, draft: { id: uid(), type: k, title: '', fav: false, fields: {}, files: [] } }));
   return h('div', { class: 'screen' },
     topBar(def.label, iconBtn('back', 'Back', () => go('vault')),
       custom ? h('button', { class: 'icon-btn text', onclick: () => categoryEditor(custom) }, 'Edit') : null),
     h('div', { class: 'content' },
       h('div', { class: 'cat-hero' }, catIcon(typeIcon(k), 'ico ico-hero')),
+      rows.length > 0 && healthCard(rows, k),
       rows.length
         ? h('ul', { class: 'list' }, rows.map((it) => itemRow(it)))
         : emptyState(k, def.label, add),
       null),
     h('button', { class: 'fab', 'aria-label': `Add ${def.one}`, onclick: add }, icon('plus', 'ico ico-fab')));
 };
+
+// One short fact, shown for a moment when you tap + (tap to skip)
+const FACTS = [
+  ['lock', 'Encrypted on your phone', 'Everything you add is locked on this device before it is saved anywhere.'],
+  ['folder', 'Stored in your own Google Drive', 'Your vault lives in a hidden folder in your Drive — never on our servers.'],
+  ['eyeOff', 'Nobody else can read it', 'Not Google, and not even the person who made this app. Only your master password opens it.'],
+  ['shield', 'One password each', 'If one site leaks, a unique password stops it unlocking your other accounts.'],
+  ['recent', 'Keep your recovery key safe', 'It is the only way back in if you ever forget your master password.'],
+  ['fav', 'Long beats clever', 'A short sentence like “mango-tree-by-the-river” is harder to crack than “P@ssw0rd!”.']
+];
+function showFact(then) {
+  let i = 0;
+  try { i = (Number(localStorage.getItem('oy.fact')) || 0) % FACTS.length; localStorage.setItem('oy.fact', String(i + 1)); } catch {}
+  const [ic, title, text] = FACTS[i];
+  let done = false;
+  const finish = () => { if (done) return; done = true; o.classList.add('out'); setTimeout(() => { o.remove(); then(); }, 220); };
+  const o = h('div', { class: 'fact', role: 'status', onclick: finish },
+    h('div', { class: 'fact-card' }, icon(ic, 'ico fact-ico'), h('p', { class: 'fact-title' }, title), h('p', { class: 'fact-text' }, text),
+      h('span', { class: 'fact-bar' })));
+  document.body.append(o);
+  setTimeout(finish, 2200);
+}
 
 function findItem(id) { return state.data.items.find((i) => i.id === id); }
 
@@ -1867,6 +1893,7 @@ function specialView(k) {
     topBar(SPECIAL[k], iconBtn('back', 'Back', () => go('vault', { query: '' })), null),
     h('div', { class: 'content' },
       h('div', { class: 'cat-hero' }, catIcon(k, 'ico ico-hero')),
+      k === 'all' && items.length > 0 && healthCard(items, 'all'),
       k === 'all' && items.length > 0 && h('input', { class: 'input search', id: 'all-search', type: 'search', placeholder: 'Search everything', value: state.query || '', autocomplete: 'off',
         oninput: (e) => { state.query = e.target.value; drawList(); } }),
       listWrap));

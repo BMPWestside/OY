@@ -968,3 +968,25 @@ body:not(.preview) .lift-inner .door-app { padding-top: var(--safe-top); }
 [data-glass="on"] body::before { background: color-mix(in srgb, var(--bg) 82%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); }
 /* when a field is focused, keep it clear of the sticky header */
 .input, textarea { scroll-margin-top: calc(var(--safe-top) + 84px); }
+
+/* ---------- Clean welcome ---------- */
+.center-screen.welcome { min-height: calc(100dvh - var(--safe-top, 0px)); justify-content: center; gap: 36px; padding-block: 40px; }
+.welcome-actions { width: 100%; max-width: 380px; align-self: center; }
+.welcome-restore { align-self: center; font-size: .88rem; }
+
+/* ---------- Fact before adding ---------- */
+.fact { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; cursor: pointer;
+  padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: max(24px, env(safe-area-inset-right, 0px));
+  background: color-mix(in srgb, var(--bg) 70%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  animation: fade .2s ease; }
+.fact.out { opacity: 0; transition: opacity .2s ease; }
+.fact-card { max-width: 320px; display: grid; justify-items: center; gap: 8px; text-align: center; padding: 26px 22px 20px; border-radius: 22px;
+  background: var(--surface); border: 1px solid var(--line); box-shadow: 0 20px 40px -18px rgba(0,0,0,.6); animation: rise .3s cubic-bezier(.2,.9,.3,1.2); position: relative; overflow: hidden; }
+[data-glass="on"] .fact-card { background: var(--glass); border-color: var(--glass-line); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
+.fact-ico { width: 34px; height: 34px; color: var(--gold); margin-bottom: 4px; }
+.fact-title { font: 600 1.1rem/1.25 var(--font-display); text-wrap: balance; }
+.fact-text { color: var(--muted); font-size: .92rem; line-height: 1.45; }
+.fact-bar { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--gold); transform-origin: left; animation: factBar 2.2s linear forwards; }
+@keyframes factBar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+/* health card inside a category */
+.content > .health-strip { margin-top: -2px; }
