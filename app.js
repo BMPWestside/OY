@@ -1059,7 +1059,7 @@ async function openAttachment(it, att) {
     if (!(await confirmBox('Delete this file?', `“${att.name}” will be removed from ${it.title}.`, 'Delete', true))) return;
     close();
     it.files = it.files.filter((x) => x.id !== att.id);
-    await withBusy('Deleting…', async () => { await attRemove(att.id); if (att.thumbId) await attRemove(att.thumbId).catch(() => {}); await save(); });
+    await withBusy('Deleting…', async () => { for (const id of [att.id, att.thumbId, att.faceId].filter(Boolean)) await attRemove(id).catch(() => {}); await save(); });
     render(); toast('File deleted');
   };
 
@@ -1081,7 +1081,7 @@ async function openAttachment(it, att) {
 }
 
 // ---------- PDF previews: render page 1 on the phone (pdf.js), trim the margins, keep it encrypted ----------
-const attIdsOf = (it) => (it.files || []).flatMap((a) => (a.thumbId ? [a.id, a.thumbId] : [a.id]));
+const attIdsOf = (it) => (it.files || []).flatMap((a) => [a.id, a.thumbId, a.faceId].filter(Boolean));
 let pdfjsLib = null;
 async function loadPdfJs() {
   if (pdfjsLib) return pdfjsLib;
@@ -1113,6 +1113,23 @@ async function pdfPreview(bytes) {
     }
     let out = c;
     if (x1 > x0 && y1 > y0 && (x1 - x0) * (y1 - y0) > width * height * 0.02) {
+      // Front only: if the page holds the front and back one above the other (or side by side), keep the first card
+      const ink = (x, y) => { const i = (y * width + x) * 4; return data[i] < 236 || data[i + 1] < 236 || data[i + 2] < 236; };
+      const firstBand = (from, to, isBlank, minGap, minSize) => {
+        let start = from, run = 0;
+        for (let p = from; p <= to; p++) {
+          if (isBlank(p)) { run++; continue; }
+          if (run >= minGap && p - run - start >= minSize) return [start, p - run];
+          if (run >= minGap) start = p;
+          run = 0;
+        }
+        return [from, to];
+      };
+      const H = y1 - y0, W = x1 - x0;
+      const rowBlank = (y) => { for (let x = x0; x <= x1; x += 3) if (ink(x, y)) return false; return true; };
+      [y0, y1] = firstBand(y0, y1, rowBlank, Math.max(6, H * 0.015), H * 0.18);
+      const colBlank = (x) => { for (let y = y0; y <= y1; y += 3) if (ink(x, y)) return false; return true; };
+      [x0, x1] = firstBand(x0, x1, colBlank, Math.max(6, W * 0.015), W * 0.25);
       const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.02);
       x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(width, x1 + pad); y1 = Math.min(height, y1 + pad);
       out = document.createElement('canvas'); out.width = x1 - x0; out.height = y1 - y0;
@@ -1124,8 +1141,10 @@ async function pdfPreview(bytes) {
 }
 /** Make (once) and save an encrypted preview picture for a PDF attachment. */
 const thumbJobs = new Map();
+const THUMB_V = 2;
 function ensurePdfThumb(it, att, persist = true) {
-  if (att.thumbId || att.type !== 'application/pdf' || PREVIEW) return Promise.resolve(att.thumbId || null);
+  if (att.type !== 'application/pdf' || PREVIEW) return Promise.resolve(att.thumbId || null);
+  if (att.thumbId && att.thumbV === THUMB_V) return Promise.resolve(att.thumbId);
   if (att.noThumb) return Promise.resolve(null);
   if (thumbJobs.has(att.id)) return thumbJobs.get(att.id);
   const job = (async () => {
@@ -1133,7 +1152,10 @@ function ensurePdfThumb(it, att, persist = true) {
       const jpg = await pdfPreview(await attLoad(att.id));
       const tid = uid();
       await attSave(tid, jpg);
-      att.thumbId = tid;
+      const old = att.thumbId;
+      att.thumbId = tid; att.thumbV = THUMB_V;
+      if (old) attRemove(old).catch(() => {});
+      if (att.faceId) { attRemove(att.faceId).catch(() => {}); delete att.faceId; delete att.faceV; }
       if (persist) await save();
       return tid;
     } catch (e) { console.warn('PDF preview failed', e); return null; }
@@ -1141,14 +1163,73 @@ function ensurePdfThumb(it, att, persist = true) {
   thumbJobs.set(att.id, job);
   return job;
 }
+// Face finder (pico.js, MIT) — runs on the phone; used to make a face thumbnail for IDs with a photo
+let picoReady = null;
+function loadPico() {
+  if (picoReady) return picoReady;
+  picoReady = (async () => {
+    if (!window.pico) await new Promise((res, rej) => {
+      const sc = document.createElement('script'); sc.src = new URL('vendor/pico/pico.js', document.baseURI).href;
+      sc.onload = res; sc.onerror = () => rej(new Error('face finder missing')); document.head.append(sc);
+    });
+    const r = await fetch(new URL('vendor/pico/facefinder', document.baseURI).href);
+    if (!r.ok) throw new Error('face model missing');
+    return window.pico.unpack_cascade(new Int8Array(await r.arrayBuffer()));
+  })();
+  picoReady.catch(() => { picoReady = null; });
+  return picoReady;
+}
+async function faceCrop(bytes, type) {
+  const classify = await loadPico();
+  const bmp = await createImageBitmap(new Blob([bytes], { type }));
+  const scale = Math.min(1, 720 / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * scale), hgt = Math.round(bmp.height * scale);
+  const c = document.createElement('canvas'); c.width = w; c.height = hgt;
+  const ctx = c.getContext('2d'); ctx.drawImage(bmp, 0, 0, w, hgt);
+  const rgba = ctx.getImageData(0, 0, w, hgt).data;
+  const gray = new Uint8Array(w * hgt);
+  for (let i = 0; i < w * hgt; i++) gray[i] = (2 * rgba[i * 4] + 7 * rgba[i * 4 + 1] + rgba[i * 4 + 2]) / 10;
+  let dets = window.pico.run_cascade({ pixels: gray, nrows: hgt, ncols: w, ldim: w }, classify,
+    { shiftfactor: 0.1, minsize: Math.max(20, Math.min(w, hgt) * 0.12), maxsize: Math.min(w, hgt), scalefactor: 1.1 });
+  dets = window.pico.cluster_detections(dets, 0.2).filter((d) => d[3] > 5).sort((a, b) => b[3] - a[3]);
+  if (!dets.length) return null;
+  const [r, col, size] = dets[0];
+  const side = Math.min(Math.max(w, hgt), size * 1.7);
+  const sx = Math.max(0, Math.min(w - side, col - side / 2)), sy = Math.max(0, Math.min(hgt - side, r - side * 0.52));
+  const out = document.createElement('canvas'); out.width = out.height = 240;
+  out.getContext('2d').drawImage(c, sx / 1, sy / 1, side, side, 0, 0, 240, 240);
+  const blob = await new Promise((res) => out.toBlob(res, 'image/jpeg', 0.88));
+  return new Uint8Array(await blob.arrayBuffer());
+}
+const FACE_TYPES = ['licence', 'passport', 'document'];
+const faceJobs = new Map();
+/** Face thumbnail for an ID (photo or PDF front). Saved once, encrypted, beside the file. */
+function ensureFace(it, att, pic) {
+  if (PREVIEW || !FACE_TYPES.includes(it.type)) return Promise.resolve(null);
+  if (att.faceId) return Promise.resolve(att.faceId);
+  if (att.faceV === 1) return Promise.resolve(null);   // already looked, no face found
+  if (faceJobs.has(att.id)) return faceJobs.get(att.id);
+  const job = (async () => {
+    try {
+      const jpg = await faceCrop(await attLoad(pic.id), pic.type);
+      att.faceV = 1;
+      if (jpg) { const fid = uid(); await attSave(fid, jpg); att.faceId = fid; }
+      await save();
+      return att.faceId || null;
+    } catch (e) { console.warn('Face finder', e); return null; }
+  })();
+  faceJobs.set(att.id, job);
+  return job;
+}
+
 /** The picture to show for an item: a photo, or the preview of a PDF. Resolves to { id, type } or null. */
 async function frontPicture(it) {
   const files = it.files || [];
   const img = files.find((a) => a.type.startsWith('image/'));
-  if (img) return { id: img.id, type: img.type };
+  if (img) return { id: img.id, type: img.type, att: img };
   for (const a of files) if (a.type === 'application/pdf') {
     const tid = await ensurePdfThumb(it, a);
-    if (tid) return { id: tid, type: 'image/jpeg' };
+    if (tid) return { id: tid, type: 'image/jpeg', att: a };
   }
   return null;
 }
@@ -1177,7 +1258,7 @@ function draftAttachments(d) {
       thumbTile(att, () => {}),
       h('button', { type: 'button', class: 'att-x', 'aria-label': `Remove ${att.name}`, onclick: async () => {
         d.files = d.files.filter((x) => x.id !== att.id);
-        const ids = att.thumbId ? [att.id, att.thumbId] : [att.id];
+        const ids = [att.id, att.thumbId, att.faceId].filter(Boolean);
         if (d._added.includes(att.id)) { d._added = d._added.filter((x) => !ids.includes(x)); ids.forEach((id) => attRemove(id).catch(() => {})); }
         else d._removed.push(...ids);
         draw();
@@ -1934,6 +2015,8 @@ function rowLead(it, showCat) {
     const t = h('span', { class: 'row-thumb loading', 'aria-hidden': 'true' });
     frontPicture(it).then(async (pic) => {
       if (!pic) throw new Error('none');
+      const fid = await ensureFace(it, pic.att, pic);
+      if (fid) { pic = { id: fid, type: 'image/jpeg' }; t.classList.add('face'); }
       const bytes = await attLoad(pic.id);
       t.style.backgroundImage = `url("${URL.createObjectURL(new Blob([bytes], { type: pic.type }))}")`;
       t.classList.remove('loading');

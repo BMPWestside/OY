@@ -1011,3 +1011,4 @@ body:not(.preview) .lift-inner .door-app { padding-top: var(--safe-top); }
 .att-thumb { position: relative; }
 .att-pdf .att-full { margin-bottom: 4px; }
 .att-pdf .btn { text-decoration: none; }
+.row-thumb.face { border-radius: 50%; background-size: cover; box-shadow: 0 0 0 2px var(--gold); border: 0; }

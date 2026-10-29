@@ -1,6 +1,6 @@
 // OY! service worker: caches the app's own files so it opens offline.
 // It never caches vault data or anything from Google.
-const CACHE = 'oy-v13';
+const CACHE = 'oy-v14';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'crypto.js', 'store.js', 'config.js', 'manifest.json', 'icon.svg', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
