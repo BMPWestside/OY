@@ -1774,6 +1774,16 @@ function showFact(then) {
   setTimeout(finish, 2200);
 }
 
+// Show a password with numbers and symbols in their own colours (easier to read out or type)
+function colourPw(v) {
+  const frag = document.createDocumentFragment();
+  for (const ch of String(v)) {
+    const cls = /[0-9]/.test(ch) ? 'pw-num' : /[A-Za-z]/.test(ch) ? (/[A-Z]/.test(ch) ? 'pw-up' : '') : ch === ' ' ? 'pw-space' : 'pw-sym';
+    frag.append(cls ? h('span', { class: cls }, ch === ' ' ? '␣' : ch) : document.createTextNode(ch));
+  }
+  return frag;
+}
+
 function findItem(id) { return state.data.items.find((i) => i.id === id); }
 
 // ---------- Letter badges ----------
@@ -2197,7 +2207,10 @@ VIEWS.item = () => {
     const side = [];
     if (secret) side.push(h('button', { class: 'eye-btn', 'aria-label': `Show ${name}`, onclick: (e) => {
       e.stopPropagation();
-      shown = !shown; valEl.textContent = shown ? v : '••••••••••'; valEl.classList.toggle('masked', !shown);
+      shown = !shown; valEl.classList.toggle('masked', !shown);
+      if (!shown) valEl.textContent = '••••••••••';
+      else if (/password|pin|passcode|code/i.test(label) || k === passwordKey(it)) valEl.replaceChildren(colourPw(v));
+      else valEl.textContent = v;
       e.currentTarget.replaceChildren(icon(shown ? 'eyeOff' : 'eye', 'ico'));
     } }, icon('eye', 'ico')));
     if (k === 'url') {
@@ -2321,19 +2334,21 @@ function openGenerator(onUse) {
   const opts = { length: 20, upper: true, lower: true, digits: true, symbols: true };
   const out = h('div', { class: 'gen-out mono' });
   const lenLabel = h('span', {}, '');
-  const regen = () => { out.textContent = C.generatePassword(opts); lenLabel.textContent = `Length: ${opts.length}`; };
+  let current = '';
+  const regen = () => { current = C.generatePassword(opts); out.replaceChildren(colourPw(current)); lenLabel.textContent = `Length: ${opts.length}`; };
   const slider = h('input', { type: 'range', min: 8, max: 64, value: opts.length, oninput: (e) => { opts.length = +e.target.value; regen(); } });
   const toggle = (key, label) => h('label', { class: 'check' },
     h('input', { type: 'checkbox', checked: opts[key], onchange: (e) => { opts[key] = e.target.checked; regen(); } }), h('span', {}, label));
   regen();
   modal('Password generator', h('div', { class: 'stack' },
     out,
+    h('div', { class: 'pw-key' }, h('span', {}, 'abc letters'), h('span', {}, h('b', { class: 'pw-num' }, '123'), ' numbers'), h('span', {}, h('b', { class: 'pw-sym' }, '#!?'), ' symbols')),
     h('button', { type: 'button', class: 'btn outline', onclick: regen }, '↻ New one'),
     lenLabel, slider,
     h('div', { class: 'toggles' }, toggle('upper', 'A–Z'), toggle('lower', 'a–z'), toggle('digits', '0–9'), toggle('symbols', '!@#'))),
   (close) => [
     h('button', { class: 'btn ghost', onclick: close }, 'Cancel'),
-    h('button', { class: 'btn gold', onclick: () => { onUse(out.textContent); close(); } }, 'Use this')
+    h('button', { class: 'btn gold', onclick: () => { onUse(current); close(); } }, 'Use this')
   ]);
 }
 
