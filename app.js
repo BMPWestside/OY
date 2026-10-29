@@ -20,8 +20,8 @@ const TYPES = {
     ['holder', 'Name on card'], ['number', 'Card number', 'secret'], ['expiry', 'Expiry (MM/YY)'],
     ['cvv', 'CVV', 'secret'], ['pin', 'PIN', 'secret'], ['notes', 'Notes', 'multi']] },
   bank:     { label: 'Bank accounts', one: 'bank account', fields: [
-    ['bank', 'Bank'], ['accountName', 'Account name'], ['bsb', 'BSB'], ['accountNumber', 'Account number', 'secret'],
-    ['netbankId', 'Online banking ID', 'secret'], ['notes', 'Notes', 'multi']] },
+    ['bank', 'Bank'], ['accountName', 'Account name'], ['bsb', 'BSB'], ['accountNumber', 'Account number'],
+    ['netbankId', 'Online banking ID'], ['password', 'Password', 'secret'], ['notes', 'Notes', 'multi']] },
   rewards:  { label: 'Reward cards', one: 'reward card', fields: [
     ['program', 'Program (Flybuys, Everyday Rewards, Qantas…)'], ['memberNumber', 'Member number'],
     ['password', 'Password or PIN', 'secret'], ['notes', 'Notes', 'multi']] },
