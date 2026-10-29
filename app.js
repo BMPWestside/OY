@@ -1081,7 +1081,7 @@ async function openAttachment(it, att) {
 }
 
 // ---------- PDF previews: render page 1 on the phone (pdf.js), trim the margins, keep it encrypted ----------
-const attIdsOf = (it) => (it.files || []).flatMap((a) => [a.id, a.thumbId, a.faceId].filter(Boolean));
+const attIdsOf = (it) => [...(it.files || []).flatMap((a) => [a.id, a.thumbId, a.faceId]), it.logoId].filter(Boolean);
 let pdfjsLib = null;
 async function loadPdfJs() {
   if (pdfjsLib) return pdfjsLib;
@@ -1784,6 +1784,44 @@ function colourPw(v) {
   return frag;
 }
 
+// Choose your own logo for an item (any picture; resized, encrypted, synced)
+function logoPicker(d, keepTyping) {
+  const preview = h('span', { class: 'logo-pick-prev' });
+  const draw = () => {
+    preview.replaceChildren(logoEl(d, avatar({ title: d.title || '?' }), 'site-logo'));
+    removeBtn.hidden = !d.logoId;
+  };
+  const pick = async () => {
+    const [f] = await new Promise((res) => {
+      const inp = h('input', { type: 'file', accept: 'image/*', style: 'display:none', onchange: () => { res([...inp.files]); inp.remove(); } });
+      document.body.append(inp); inp.click();
+    });
+    if (!f) return;
+    try {
+      const bmp = await createImageBitmap(f);
+      const c = document.createElement('canvas'); c.width = c.height = 192;
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 192, 192);
+      const k = Math.min(192 / bmp.width, 192 / bmp.height);
+      ctx.drawImage(bmp, (192 - bmp.width * k) / 2, (192 - bmp.height * k) / 2, bmp.width * k, bmp.height * k);
+      const bytes = new Uint8Array(await (await new Promise((r) => c.toBlob(r, 'image/png'))).arrayBuffer());
+      const id = uid();
+      await attSave(id, bytes);
+      d._added = d._added || []; d._added.push(id);
+      if (d.logoId && !(d._added || []).includes(d.logoId)) (d._removed = d._removed || []).push(d.logoId);
+      d.logoId = id; keepTyping(); draw();
+    } catch { toast('Could not use that picture', 'err'); }
+  };
+  const removeBtn = h('button', { type: 'button', class: 'mini', onclick: () => {
+    if (d.logoId) (d._removed = d._removed || []).push(d.logoId);
+    delete d.logoId; keepTyping(); draw();
+  } }, 'Remove');
+  const row = h('div', { class: 'logo-pick' }, preview,
+    h('span', { class: 'logo-pick-text' }, h('span', { class: 'field-label' }, 'Logo'), h('span', { class: 'setting-sub' }, 'Pick a picture, like a screenshot of the logo')),
+    h('button', { type: 'button', class: 'mini', onclick: pick }, 'Choose'), removeBtn);
+  draw();
+  return row;
+}
+
 function findItem(id) { return state.data.items.find((i) => i.id === id); }
 
 // ---------- Letter badges ----------
@@ -2037,11 +2075,20 @@ function siteDomains(it) {
 }
 const logoMiss = new Set();     // sites with no logo this session (not saved anywhere)
 function logoEl(it, fallback, cls = 'site-logo') {
+  if (it.logoId) {
+    const wrap = h('span', { class: `${cls} custom`, 'aria-hidden': 'true' });
+    const img = h('img', { alt: '' }); wrap.append(img);
+    attLoad(it.logoId).then((b) => { img.src = URL.createObjectURL(new Blob([b], { type: 'image/png' })); wrap.classList.add('ok'); })
+      .catch(() => { if (wrap.isConnected) wrap.replaceWith(fallback); });
+    return wrap;
+  }
   if (!logosOn()) return fallback;
   const doms = siteDomains(it).filter((x) => !logoMiss.has(x));
   if (!doms.length) return fallback;
   const d = doms.join('|');
-  const tries = doms.flatMap((x) => [`https://${x}/apple-touch-icon.png`, `https://www.${x}/apple-touch-icon.png`, `https://${x}/favicon.ico`]);
+  const tries = doms.flatMap((x) => [`https://${x}/apple-touch-icon.png`, `https://www.${x}/apple-touch-icon.png`,
+    `https://www.${x}/apple-touch-icon-precomposed.png`, `https://www.${x}/favicon-192x192.png`, `https://www.${x}/favicon.png`,
+    `https://${x}/favicon.ico`, `https://www.${x}/favicon.ico`]);
   const wrap = h('span', { class: cls, 'aria-hidden': 'true' });
   const img = h('img', { alt: '', referrerpolicy: 'no-referrer', decoding: 'async' });
   let n = 0;
@@ -2318,6 +2365,7 @@ VIEWS.edit = () => {
         d.mode = m; render();
       }),
       h('label', { class: 'form-field' }, h('span', { class: 'field-label' }, 'Name'), title),
+      logoPicker(d, () => { d.title = title.value; for (const [k, el] of Object.entries(inputs)) d.fields[k] = el.value; }),
       !(def.files && d.mode === 'files') && fieldEls,
       !(def.files && d.mode === 'files') && h('button', { type: 'button', class: 'btn link edit-fields', onclick: () => {
         d.title = title.value;
