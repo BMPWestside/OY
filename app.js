@@ -436,11 +436,13 @@ async function save() {
   try {
     await S.driveSave(state.file, state.account.email);
     state.sync = 'saved';
+    S.flushPendingAtts(state.account.id).catch((e) => console.warn(e));
   } catch (e) {
     console.warn(e);
-    state.sync = 'pending';
+    state.sync = e && e.code === 'reconnect' ? 'reconnect' : 'pending';
   }
   updateSyncBadge();
+  const bar = document.querySelector('.sync-bar'); if (bar) bar.hidden = !(isDrive() && !S.hasToken());
 }
 async function persistKeysOnly() {
   if (state.account && state.account.id === 'sample') return;
@@ -450,7 +452,7 @@ async function persistKeysOnly() {
 }
 window.addEventListener('online', () => { if (state.sync === 'pending' && state.session) save(); });
 
-const SYNC_TEXT = { idle: '', saving: 'Saving…', saved: 'Synced to your Drive', pending: 'Saved on device · will sync', local: 'This device only', sample: 'Sample data · not saved', error: 'Sync error' };
+const SYNC_TEXT = { idle: '', saving: 'Saving…', saved: 'Synced to your Drive', pending: 'Saved on device · will sync', reconnect: 'Not synced · sign in again', local: 'This device only', sample: 'Sample data · not saved', error: 'Sync error' };
 function syncBadge() {
   return h('span', { class: `sync sync-${state.sync}`, id: 'sync' }, SYNC_TEXT[state.sync] || '');
 }
@@ -483,22 +485,71 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ---------------- Account start-up ----------------
-async function startDrive(hint) {
-  try {
-    await withBusy('Connecting to Google…', async () => {
-      const acc = await S.signIn(hint);
-      state.account = acc;
-      S.rememberAccount(acc);
-      state.busy = 'Looking for your vault…'; render();
-      const remote = await S.driveLoad(acc.email);
-      const cached = await S.local.get(acc.id);
-      state.file = pickNewest(remote, cached);
-      if (remote && cached && cached.updatedAt > remote.updatedAt) state.sync = 'pending'; else state.sync = 'saved';
-    });
-    go(state.file ? 'unlock' : 'create');
-  } catch (e) {
-    toast(e.message || 'Sign-in failed', 'err');
+// ---------- Google Drive ----------
+function startDrive(hint) {
+  return S.signIn(hint, 'signin'); // goes to Google; we pick up again in boot()
+}
+/** Open a Google-linked vault: newest of Drive and this device's copy. */
+async function openDrive(acc) {
+  state.account = acc;
+  S.rememberAccount(acc);
+  let remote = null, reachable = false;
+  await withBusy('Looking for your vault…', async () => {
+    if (S.hasToken()) {
+      try { remote = await S.driveLoad(acc.email); reachable = true; } catch (e) { console.warn(e); }
+    }
+    const cached = await S.local.get(acc.id);
+    state.file = pickNewest(remote, cached);
+    state.sync = !reachable ? 'pending' : (cached && (!remote || cached.updatedAt > remote.updatedAt)) ? 'pending' : 'saved';
+  });
+  if (state.file) return go('unlock');
+  // Nothing in Drive yet: offer to move a vault that already lives on this device
+  const here = await S.local.get('local');
+  if (C.isVaultFile(here) && reachable) {
+    const move = await confirmBox('Move your vault into Google Drive?',
+      'OY! found a vault on this device. Unlock it with its master password and it will move into your Google Drive. Nothing is lost.', 'Move it');
+    if (move) {
+      Object.assign(state, { account: { id: 'local', name: 'This device' }, file: here, sync: 'local', pendingLink: acc });
+      go('unlock'); toast('Unlock to finish moving your vault');
+      return;
+    }
   }
+  if (!reachable) { toast('Could not reach Google Drive. Check your connection and try again.', 'err'); return go('welcome'); }
+  go('create');
+}
+/** Move the unlocked device-only vault (and its photos) into this Google account. */
+async function linkToDrive(acc) {
+  state.pendingLink = null;
+  let remote = null;
+  try { remote = await withBusy('Checking your Google Drive…', () => S.driveLoad(acc.email)); }
+  catch { return toast('Could not reach Google Drive. Your vault is still safe on this device.', 'err'); }
+  if (remote && !(await confirmBox('Replace the vault in Google Drive?',
+    'This Google account already has an OY! vault. Replace it with the vault on this device? The one in Drive will be overwritten.', 'Replace', true))) {
+    return toast('Nothing changed. Your vault stays on this device.');
+  }
+  const from = state.account.id;
+  let ok = true;
+  await withBusy('Moving your vault to Google Drive…', async () => {
+    for (const it of state.data.items) for (const att of it.files || []) {
+      const box = await S.local.get(`${from}:att:${att.id}`);
+      if (box) await S.attPut(acc.id, att.id, box, acc.email);
+    }
+    state.account = acc;
+    S.rememberAccount(acc);
+    await save();
+    ok = state.sync === 'saved';
+  });
+  if (!ok) return toast('Moved, but the upload has not finished. It will retry automatically.', 'err');
+  // Clean up the old device-only copy now that Drive has it
+  for (const it of state.data.items) for (const att of it.files || []) await S.local.del(`${from}:att:${att.id}`).catch(() => {});
+  await S.local.del(from).catch(() => {});
+  try { const b = localStorage.getItem(`oy.bio.${from}`); if (b) { localStorage.setItem(`oy.bio.${acc.id}`, b); localStorage.removeItem(`oy.bio.${from}`); } } catch {}
+  render();
+  toast('Your vault is now synced to Google Drive');
+}
+function reconnectDrive() {
+  return confirmBox('Reconnect Google Drive?', 'You’ll sign in with Google again, then unlock OY! to carry on. Nothing is lost.', 'Continue')
+    .then((yes) => { if (yes) S.signIn(state.account.email, 'reconnect'); });
 }
 function pickNewest(a, b) {
   const ok = (x) => C.isVaultFile(x) ? x : null;
@@ -630,12 +681,12 @@ VIEWS.welcome = () => {
     h('p', { class: 'tagline' }, 'Your passwords, cards and IDs — locked so only you can open them.'),
     h('div', { class: 'stack' },
       remembered && remembered.id !== 'local' && S.driveConfigured &&
-        h('button', { class: 'btn gold big', onclick: () => startDrive(remembered.email) }, `Continue as ${remembered.email}`),
+        h('button', { class: 'btn gold big', onclick: () => (S.hasToken() ? openDrive(remembered) : startDrive(remembered.email)) }, `Continue as ${remembered.email}`),
       remembered && remembered.id === 'local' &&
         h('button', { class: 'btn gold big', onclick: startLocal }, 'Open my vault on this device'),
       S.driveConfigured &&
         h('button', { class: `btn ${remembered ? 'outline' : 'gold'} big`, onclick: () => startDrive() },
-          h('span', { class: 'g' }, 'G'), remembered ? 'Use a different Google account' : 'Sign in with Google'),
+          h('span', { class: 'g' }, 'G'), remembered && remembered.id !== 'local' ? 'Use a different Google account' : 'Sign in with Google'),
       (!remembered || remembered.id !== 'local') &&
         h('button', { class: 'btn outline big', onclick: startLocal }, 'Use on this device only'),
       PREVIEW && h('button', { class: 'btn gold big', onclick: startSample }, 'Explore with sample data'),
@@ -750,7 +801,8 @@ async function unlockSuccess(res) {
     await new Promise((r) => setTimeout(r, reduce ? 500 : 1650));
   }
   go('vault'); resetIdle();
-  if (state.sync === 'pending') save();
+  if (state.pendingLink) return linkToDrive(state.pendingLink);
+  if (isDrive() && S.hasToken() && state.sync !== 'saved') save();
 }
 
 // The unlock button: a gold keyhole. On success it turns like a key, fills with light,
@@ -1149,6 +1201,8 @@ VIEWS.vault = () => {
     topBar(arranging ? 'Drag to rearrange' : logo('sm'), left, right),
     !arranging && h('div', { class: `pull-hint ${(() => { try { return localStorage.getItem('oy.pulled') ? '' : 'first'; } catch { return ''; } })()}`, 'aria-hidden': 'true' }, icon('search', 'ico'), h('span', { class: 'ph-a' }, 'Pull down to search'), h('span', { class: 'ph-b' }, 'Let go to search')),
     !arranging && homeHeader(),
+    !arranging && h('button', { class: 'sync-bar', hidden: !(isDrive() && !S.hasToken()), onclick: reconnectDrive },
+      icon('recent', 'ico'), h('span', {}, 'Sync paused — tap to reconnect Google Drive')),
     grid,
     arranging && h('button', { class: 'btn link subtle reset-order', onclick: () => { state.arranging = [...HOME_KEYS]; render(); } }, 'Reset to original order'));
 };
@@ -2006,7 +2060,11 @@ VIEWS.settings = () => {
       section('Account',
         h('div', { class: 'setting-row static' }, h('span', {},
           h('span', { class: 'setting-label' }, isDrive() ? state.account.email : 'This device only'),
-          h('span', { class: 'setting-sub' }, isDrive() ? 'Vault stored encrypted in your Google Drive' : 'Vault stored encrypted on this device'))),
+          h('span', { class: 'setting-sub' }, isDrive() ? (S.hasToken() ? 'Vault stored encrypted in your Google Drive' : 'Signed out of Google for now — changes wait on this device') : 'Vault stored encrypted on this device'))),
+        !isDrive() && S.driveConfigured && state.account.id !== 'sample' && rowBtn('Turn on Google Drive sync', 'Keep an encrypted copy in your own Google Drive, and use it on other devices', async () => {
+          if (await confirmBox('Turn on Google Drive sync?', 'You’ll sign in with Google, then unlock OY! again to finish. Your vault stays encrypted, so Google can’t read it.', 'Continue')) S.signIn(null, 'link');
+        }),
+        isDrive() && !S.hasToken() && rowBtn('Reconnect Google Drive', 'Sign in again so your changes sync', reconnectDrive),
         h('label', { class: 'setting-row static' }, h('span', { class: 'setting-label' }, 'Your name'),
           h('input', { class: 'input name-input', id: 'set-name', value: prefs.name || '', placeholder: 'For the greeting', maxlength: 24, autocomplete: 'given-name',
             onchange: async (e) => { prefs.name = e.target.value.trim(); await save(); toast('Saved'); } }))),
@@ -2048,3 +2106,35 @@ applyIconStyle(savedIconStyle());
 applyGlass(savedGlass());
 document.body.prepend(h('div', { class: 'glow-backdrop', 'aria-hidden': 'true' }, h('span', { class: 'blob b1' }), h('span', { class: 'blob b2' }), h('span', { class: 'blob b3' })));
 render();
+boot();
+
+// Start-up: finish a Google sign-in we just came back from, or reopen the remembered vault
+async function boot() {
+  if (PREVIEW) return;
+  let r = null;
+  try { r = await S.takeRedirect(); } catch (e) { r = { error: 'Could not finish signing in to Google. Please try again.' }; }
+  if (r) {
+    if (r.error) toast(r.error, 'err');
+    const acc = r.account;
+    if (r.intent === 'link') {
+      if (acc) state.pendingLink = acc;
+      await startLocal();
+      if (acc) toast('Unlock to finish turning on Google Drive sync');
+      return;
+    }
+    if (acc) return openDrive(acc);
+    const rem = S.rememberedAccount();
+    if (rem && rem.id !== 'local' && r.silent) return openDrive(rem); // couldn't refresh quietly: open offline copy
+    return;
+  }
+  const rem = S.rememberedAccount();
+  if (!rem) return;
+  if (rem.id === 'local') return startLocal();
+  if (!S.driveConfigured) return;
+  if (S.hasToken()) return openDrive(rem);
+  // New session: refresh the Google sign-in quietly once, then open the vault
+  let tried = false;
+  try { tried = sessionStorage.getItem('oy.silent') === '1'; sessionStorage.setItem('oy.silent', '1'); } catch {}
+  if (!tried && navigator.onLine) return S.signIn(rem.email, 'signin', { silent: true });
+  return openDrive(rem);
+}

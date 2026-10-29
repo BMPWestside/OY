@@ -895,3 +895,7 @@ body.is-home .home-grid.as-list { grid-template-rows: repeat(var(--rows, 12), mi
   60%, 100% { box-shadow: 0 0 0 1px transparent, 0 0 90px 30px color-mix(in srgb, var(--gold) 40%, transparent); background: transparent; } }
 @keyframes fadeAway { to { opacity: 0; transform: translateY(-10px); } }
 .unlock-screen { overflow: hidden; }
+.sync-bar { display: flex; align-items: center; gap: 8px; margin: 8px max(20px, env(safe-area-inset-right, 0px)) 0 max(20px, env(safe-area-inset-left, 0px));
+  padding: 8px 12px; border-radius: 12px; border: 1px solid rgba(240, 180, 41, .45); background: rgba(240, 180, 41, .12);
+  color: var(--fg); font-size: .82rem; font-weight: 600; cursor: pointer; text-align: left; flex: none; }
+.sync-bar .ico { width: 16px; height: 16px; color: #f0b429; }
