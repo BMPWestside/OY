@@ -2016,17 +2016,27 @@ function siteDomain(it) {
   if (['login', 'note', 'wifi', 'taxid', 'document'].includes(it.type) || !TYPES[it.type]) return serviceDomain(it.title) || bankDomain(it.title);
   return null;
 }
+function siteDomains(it) {
+  const out = [];
+  const add = (d) => { if (d && !out.includes(d)) out.push(d); };
+  add(siteDomain(it));
+  add(serviceDomain(it.title)); add(bankDomain(it.title));
+  const first = out[0];
+  if (first && /\.com\.au$/.test(first)) add(first.replace(/\.com\.au$/, '.com'));   // e.g. apple.com.au → apple.com
+  return out;
+}
 const logoMiss = new Set();     // sites with no logo this session (not saved anywhere)
 function logoEl(it, fallback, cls = 'site-logo') {
   if (!logosOn()) return fallback;
-  const d = siteDomain(it);
-  if (!d || logoMiss.has(d)) return fallback;
-  const tries = [`https://${d}/apple-touch-icon.png`, `https://www.${d}/apple-touch-icon.png`, `https://${d}/favicon.ico`];
+  const doms = siteDomains(it).filter((x) => !logoMiss.has(x));
+  if (!doms.length) return fallback;
+  const d = doms.join('|');
+  const tries = doms.flatMap((x) => [`https://${x}/apple-touch-icon.png`, `https://www.${x}/apple-touch-icon.png`, `https://${x}/favicon.ico`]);
   const wrap = h('span', { class: cls, 'aria-hidden': 'true' });
   const img = h('img', { alt: '', referrerpolicy: 'no-referrer', decoding: 'async' });
   let n = 0;
   const next = () => {
-    if (n >= tries.length) { logoMiss.add(d); if (wrap.isConnected) wrap.replaceWith(fallback); return; }
+    if (n >= tries.length) { doms.forEach((x) => logoMiss.add(x)); if (wrap.isConnected) wrap.replaceWith(fallback); return; }
     img.src = tries[n++];
   };
   img.onerror = next;
