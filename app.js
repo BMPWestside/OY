@@ -411,7 +411,8 @@ function render() {
   const view = VIEWS[state.screen] || VIEWS.welcome;
   document.body.classList.toggle('is-home', state.screen === 'vault' && !!state.data);
   const el = view();
-  if (lastScreen && lastScreen !== state.screen && el && el.classList) {
+  if (state.noAnim) state.noAnim = false;
+  else if (lastScreen && lastScreen !== state.screen && el && el.classList) {
     const fwd = (DEPTH[state.screen] ?? 1) >= (DEPTH[lastScreen] ?? 1);
     el.classList.add(fwd ? 'enter-fwd' : 'enter-back');
   }
@@ -794,15 +795,42 @@ async function unlockSuccess(res) {
   if (state.data.prefs.appearance && state.data.prefs.appearance !== savedAppearance()) { try { localStorage.setItem('oy.appearance', state.data.prefs.appearance); } catch {} applyTheme(savedTheme()); }
   if (state.data.prefs.theme && state.data.prefs.theme !== savedTheme()) { try { localStorage.setItem('oy.theme', state.data.prefs.theme); } catch {} applyTheme(state.data.prefs.theme); }
   const screen = document.querySelector('.unlock-screen');
-  if (screen) {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (screen && !reduce) {
     buzz([10, 60, 25]);
-    screen.classList.add('opening');
-    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    await new Promise((r) => setTimeout(r, reduce ? 500 : 1650));
+    screen.classList.add('opening');                 // keyhole turns, "Only You" → "Can See"
+    await new Promise((r) => setTimeout(r, 750));
+    const doors = vaultDoors();                      // freeze the lock screen into two doors…
+    state.noAnim = true; go('vault');                // …build the vault behind them…
+    requestAnimationFrame(() => requestAnimationFrame(() => doors.classList.add('open'))); // …and swing them apart
+    buzz(14);
+    setTimeout(() => doors.remove(), 1000);
+  } else {
+    if (screen) { screen.classList.add('opening'); await new Promise((r) => setTimeout(r, 400)); }
+    go('vault');
   }
-  go('vault'); resetIdle();
+  resetIdle();
   if (state.pendingLink) return linkToDrive(state.pendingLink);
   if (isDrive() && S.hasToken() && state.sync !== 'saved') save();
+}
+
+// Vault doors: the lock screen splits down the middle and slides open, left and right.
+function vaultDoors() {
+  const bg = document.querySelector('.glow-backdrop');
+  const banner = document.querySelector('.preview-banner');
+  const half = (side) => {
+    const inner = h('div', { class: 'door-inner' });
+    if (bg && getComputedStyle(bg).display !== 'none') { const b = bg.cloneNode(true); b.classList.add('door-bg'); inner.append(b); }
+    if (banner) inner.append(banner.cloneNode(true));
+    const a = app.cloneNode(true); a.removeAttribute('id'); a.className = 'door-app';
+    a.querySelectorAll('.intro').forEach((el) => el.classList.remove('intro'));
+    a.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+    inner.append(a);
+    return h('div', { class: `door door-${side}` }, inner, h('span', { class: 'door-edge' }));
+  };
+  const doors = h('div', { class: 'doors', 'aria-hidden': 'true' }, half('l'), half('r'));
+  document.body.append(doors);
+  return doors;
 }
 
 // The unlock button: a gold keyhole. On success it turns like a key, fills with light,
