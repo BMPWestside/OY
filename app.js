@@ -405,7 +405,7 @@ function go(screen, extra = {}) {
 }
 
 // Pages slide forward/back by how deep they sit
-const DEPTH = { welcome: 0, create: 1, recovery: 2, unlock: 0, recover: 1, vault: 1, settings: 2, category: 2, item: 3, edit: 4 };
+const DEPTH = { welcome: 0, create: 1, recovery: 2, unlock: 0, recover: 1, vault: 1, settings: 2, category: 2, item: 3, edit: 4, bin: 3, kit: 3 };
 let lastScreen = null;
 function render() {
   const view = VIEWS[state.screen] || VIEWS.welcome;
@@ -613,6 +613,7 @@ function normaliseData(d) {
   d = d && typeof d === 'object' ? d : {};
   d.items = Array.isArray(d.items) ? d.items : [];
   d.prefs = d.prefs || { lockMinutes: 5 };
+  d.bin = Array.isArray(d.bin) ? d.bin : [];
   for (const it of d.items) {           // older 'ID document' items → new categories
     if (it.type === 'identity') {
       const kind = String(it.fields.docType || '').toLowerCase();
@@ -804,6 +805,7 @@ async function unlockSuccess(res) {
     go('vault');
   }
   resetIdle();
+  purgeBin().then((n) => { if (n) save(); });
   if (state.pendingLink) return linkToDrive(state.pendingLink);
   if (isDrive() && S.hasToken() && state.sync !== 'saved') save();
 }
@@ -1659,14 +1661,15 @@ function vaultHealth(items = state.data.items) {
   const weak = pw.filter((x) => x.hl.label === 'Weak').map((x) => x.it);
   const reused = pw.filter((x) => x.hl.label === 'Reused').map((x) => x.it);
   const okay = pw.filter((x) => x.hl.label === 'Okay').map((x) => x.it);
+  const leakedList = pw.filter((x) => x.hl.label === 'Leaked').map((x) => x.it);
   const dated = items.filter((it) => expiryOf(it));
   const inSet = new Set(items);
   const expiring = expiringItems().filter((it) => inSet.has(it));
   const expired = expiring.filter((it) => expiryOf(it).status === 'expired');
   const checks = pw.length + dated.length;
-  const bad = weak.length + reused.length + okay.length * 0.4 + expired.length + (expiring.length - expired.length) * 0.5;
+  const bad = leakedList.length + weak.length + reused.length + okay.length * 0.4 + expired.length + (expiring.length - expired.length) * 0.5;
   const score = checks ? Math.max(0, Math.min(100, Math.round(100 * (1 - bad / checks)))) : 100;
-  return { score, checks, weak, reused, okay, expiring, toFix: weak.length + reused.length + expiring.length };
+  return { score, checks, weak, reused, okay, leaked: leakedList, expiring, toFix: leakedList.length + weak.length + reused.length + expiring.length };
 }
 function scoreRing(score, size = 140) {
   const r = 52, c = 2 * Math.PI * r;
@@ -1696,7 +1699,7 @@ function homeHeader() {
 function healthCard(items, cat) {
   const vh = vaultHealth(items);
   if (!vh.checks) return null;
-  const bits = [vh.weak.length && `${vh.weak.length} weak`, vh.reused.length && `${vh.reused.length} reused`, vh.expiring.length && `${vh.expiring.length} expiring`,
+  const bits = [vh.leaked.length && `${vh.leaked.length} leaked`, vh.weak.length && `${vh.weak.length} weak`, vh.reused.length && `${vh.reused.length} reused`, vh.expiring.length && `${vh.expiring.length} expiring`,
     vh.okay.length && `${vh.okay.length} could be stronger`].filter(Boolean);
   return h('button', { class: `health-strip ${vh.score >= 80 ? 'good' : vh.score >= 50 ? 'mid' : 'bad'}`,
     onclick: () => go('category', { category: 'health', healthCat: cat, healthTab: null, from: null }) },
@@ -1704,30 +1707,79 @@ function healthCard(items, cat) {
     h('span', { class: 'hs-text' }, h('b', {}, `Health ${vh.score}%`), h('span', {}, bits.length ? ` · ${bits.join(' · ')}` : ' · All good')),
     h('span', { class: 'home-chev' }, '›'));
 }
+// Have I Been Pwned "range" check: only the first 5 characters of each password's SHA-1 fingerprint are sent
+async function sha1Hex(text) {
+  const d = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+async function checkBreaches() {
+  const items = state.data.items.filter((it) => { const k = passwordKey(it); return k && it.fields[k] && it.type !== 'rewards'; });
+  const byPrefix = new Map();
+  for (const it of items) {
+    const pw = it.fields[passwordKey(it)];
+    const h1 = await sha1Hex(pw);
+    const pre = h1.slice(0, 5);
+    if (!byPrefix.has(pre)) byPrefix.set(pre, []);
+    byPrefix.get(pre).push({ it, rest: h1.slice(5), pw });
+  }
+  let found = 0, done = 0;
+  for (const [pre, list] of byPrefix) {
+    state.busy = `Checking… ${Math.round((done++ / byPrefix.size) * 100)}%`; render();
+    const r = await fetch(`https://api.pwnedpasswords.com/range/${pre}`, { headers: { 'Add-Padding': 'true' }, referrerPolicy: 'no-referrer' });
+    if (!r.ok) throw new Error('The leak check service did not answer. Try again later.');
+    const counts = new Map();
+    for (const line of (await r.text()).split('\n')) { const [suf, n] = line.trim().split(':'); if (suf) counts.set(suf, Number(n) || 0); }
+    for (const { it, rest, pw } of list) {
+      const n = counts.get(rest) || 0;
+      it.pwned = { n, len: pw.length, tail: pw.slice(-1), at: Date.now() };
+      if (n > 0) found++;
+    }
+  }
+  state.data.prefs.breachAt = Date.now();
+  return { checked: items.length, found };
+}
+function breachButton() {
+  const when = state.data.prefs.breachAt;
+  return h('div', { class: 'breach-box' },
+    h('p', { class: 'small muted' }, 'Checks your passwords against billions of leaked passwords (Have I Been Pwned). Your passwords never leave your phone — only the first 5 characters of a scrambled fingerprint of each one are sent.'),
+    h('button', { class: 'btn gold', onclick: async () => {
+      try {
+        const r = await withBusy('Checking…', checkBreaches);
+        state.healthTab = 'leaked'; await save(); render();
+        toast(r.found ? `${r.found} leaked password${r.found > 1 ? 's' : ''} found` : `All ${r.checked} passwords checked — none leaked`, r.found ? 'err' : '');
+      } catch (e) { toast(e.message || 'Could not check right now', 'err'); }
+    } }, when ? 'Check again' : 'Check for leaked passwords'),
+    when && h('p', { class: 'tap-hint' }, `Last checked ${new Date(when).toLocaleDateString('en-AU')}`));
+}
+
 function healthView() {
   const cat = state.healthCat;
   const vh = vaultHealth(cat && cat !== 'all' ? state.data.items.filter((it) => it.type === cat) : state.data.items);
-  const tab = state.healthTab || (vh.weak.length ? 'weak' : vh.reused.length ? 'reused' : 'expiring');
-  const lists = { weak: vh.weak, reused: vh.reused, expiring: vh.expiring };
+  const tab = state.healthTab || (vh.leaked.length ? 'leaked' : vh.weak.length ? 'weak' : vh.reused.length ? 'reused' : 'expiring');
+  const lists = { leaked: vh.leaked, weak: vh.weak, reused: vh.reused, expiring: vh.expiring };
   const card = (key, label, ic, note) => h('button', { class: `hcard ${tab === key ? 'on' : ''} ${lists[key].length ? 'has' : ''}`,
     onclick: () => { state.healthTab = key; render(); } },
     icon(ic, 'ico'), h('span', { class: 'hcard-n' }, lists[key].length), h('span', { class: 'hcard-l' }, label), h('span', { class: 'hcard-note' }, note));
   const verdict = vh.score >= 90 ? 'Excellent' : vh.score >= 80 ? 'Looking good' : vh.score >= 50 ? 'A few things to fix' : 'Needs attention';
   const rows = lists[tab];
-  const tips = { weak: 'Open each one, tap Edit, then Generate a new password.', reused: 'Give each account its own password, so one leak can’t unlock the others.', expiring: 'Renew these, then update the expiry date here.' };
+  const tips = { leaked: 'These passwords have appeared in data breaches. Change each one on the website, then update it here.', weak: 'Open each one, tap Edit, then Generate a new password.', reused: 'Give each account its own password, so one leak can’t unlock the others.', expiring: 'Renew these, then update the expiry date here.' };
   return h('div', { class: 'screen' },
     topBar(cat && cat !== 'all' ? `${typeDef(cat).label} health` : 'Vault health', iconBtn('back', 'Back', () => go('category', { category: cat || 'all' })), null),
     h('div', { class: 'content' },
       h('div', { class: 'health-hero' }, scoreRing(vh.score, 150),
         h('p', { class: 'health-verdict' }, verdict),
         h('p', { class: 'muted small' }, vh.checks ? `Based on ${vh.checks} password${vh.checks === 1 ? '' : 's'} and expiry dates` : 'Add logins and IDs to see your score')),
-      h('div', { class: 'hcards' },
+      h('div', { class: 'hcards four' },
+        card('leaked', 'Leaked', 'shield', 'Found in breaches'),
         card('weak', 'Weak', 'login', 'Easy to guess'),
         card('reused', 'Reused', 'copy', 'Same password twice'),
         card('expiring', 'Expiring', 'expiring', 'Within 3 months')),
+      tab === 'leaked' && breachButton(),
+      tab === 'expiring' && rows.length > 0 && h('button', { class: 'btn outline', onclick: () => calendarReminders(rows) }, icon('recent', 'ico'), 'Add renewal reminders to Calendar'),
       rows.length
         ? [h('p', { class: 'tap-hint left' }, tips[tab]), h('ul', { class: 'list' }, rows.map((it) => itemRow(it, { showCat: !cat || cat === 'all', from: 'health' })))]
-        : h('div', { class: 'empty' }, h('p', { class: 'muted' }, tab === 'expiring' ? 'Nothing is expiring soon.' : `No ${tab} passwords. Nice work.`))));
+        : h('div', { class: 'empty' }, h('p', { class: 'muted' }, tab === 'expiring' ? 'Nothing is expiring soon.'
+            : tab === 'leaked' ? (state.data.prefs.breachAt ? 'None of your passwords were found in known breaches.' : 'Tap the button above to check.') : `No ${tab} passwords. Nice work.`))));
 }
 
 VIEWS.category = () => {
@@ -1822,6 +1874,201 @@ function logoPicker(d, keepTyping) {
   return row;
 }
 
+// ---------- Recently deleted (kept 30 days) ----------
+const BIN_DAYS = 30;
+function binItem(it) {
+  state.data.items = state.data.items.filter((x) => x.id !== it.id);
+  state.data.bin = [{ item: it, at: Date.now() }, ...(state.data.bin || []).filter((b) => b.item.id !== it.id)];
+}
+function restoreItem(id) {
+  const b = (state.data.bin || []).find((x) => x.item.id === id);
+  if (!b) return null;
+  state.data.bin = state.data.bin.filter((x) => x.item.id !== id);
+  state.data.items.push(b.item);
+  return b.item;
+}
+async function purgeBin(all = false) {
+  const keep = [], gone = [];
+  for (const b of state.data.bin || []) (all || Date.now() - b.at > BIN_DAYS * 86400000 ? gone : keep).push(b);
+  if (!gone.length) return 0;
+  state.data.bin = keep;
+  for (const b of gone) for (const id of attIdsOf(b.item)) await attRemove(id).catch(() => {});
+  return gone.length;
+}
+function undoToast(it) {
+  let t = document.querySelector('.toast');
+  if (!t) { t = h('div', { class: 'toast', role: 'status' }); document.body.append(t); }
+  t.replaceChildren(h('span', {}, `Moved to Recently deleted`), h('button', { class: 'toast-undo', onclick: async () => {
+    t.classList.remove('show'); restoreItem(it.id); render(); await save(); toast('Restored');
+  } }, 'Undo'));
+  t.className = 'toast show has-undo';
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 5000);
+}
+VIEWS.bin = () => {
+  const bin = (state.data.bin || []).slice().sort((a, b) => b.at - a.at);
+  const daysLeft = (b) => Math.max(0, BIN_DAYS - Math.floor((Date.now() - b.at) / 86400000));
+  return h('div', { class: 'screen' },
+    topBar('Recently deleted', iconBtn('back', 'Back', () => go('settings')), null),
+    h('div', { class: 'content' },
+      h('p', { class: 'muted small center' }, `Deleted items stay here for ${BIN_DAYS} days, then they are removed for good.`),
+      bin.length
+        ? h('ul', { class: 'list' }, bin.map((b) => h('li', { class: 'row-item' },
+            h('div', { class: 'row-main static-row' }, catIcon(typeIcon(b.item.type), 'ico row-cat'),
+              h('span', { class: 'row-text' }, h('span', { class: 'row-title' }, b.item.title),
+                h('span', { class: 'row-sub' }, `${typeDef(b.item.type).label} · ${daysLeft(b)} day${daysLeft(b) === 1 ? '' : 's'} left`))),
+            h('button', { class: 'icon-btn copy-btn', onclick: async () => { restoreItem(b.item.id); render(); await save(); toast(`${b.item.title} restored`); } }, 'Restore'))))
+        : h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'Nothing here.')),
+      bin.length > 0 && h('button', { class: 'btn danger-outline', onclick: async () => {
+        if (!(await confirmBox('Empty Recently deleted?', `${bin.length} item${bin.length > 1 ? 's' : ''} and their files will be removed for good.`, 'Delete for good', true))) return;
+        await withBusy('Deleting…', () => purgeBin(true)); render(); await save(); toast('Emptied');
+      } }, 'Delete all for good')));
+};
+
+// ---------- Password history ----------
+function historyBlock(it) {
+  const list = h('div', { class: 'hist-list', hidden: true }, (it.history || []).map((x) => {
+    const val = h('span', { class: 'field-val masked' }, '••••••••');
+    let shown = false;
+    return h('div', { class: 'hist-row' },
+      h('span', { class: 'hist-meta' }, h('b', {}, x.label.replace(/ \(.*\)$/, '')), ` · changed ${new Date(x.at).toLocaleDateString('en-AU')}`),
+      h('span', { class: 'hist-val' }, val,
+        h('button', { class: 'eye-btn', 'aria-label': 'Show', onclick: (e) => { shown = !shown; val.classList.toggle('masked', !shown);
+          if (shown) val.replaceChildren(colourPw(x.v)); else val.textContent = '••••••••'; e.currentTarget.replaceChildren(icon(shown ? 'eyeOff' : 'eye', 'ico')); } }, icon('eye', 'ico')),
+        h('button', { class: 'eye-btn', 'aria-label': 'Copy', onclick: () => copy(x.v, 'Old password copied') }, icon('copy', 'ico'))));
+  }));
+  const btn = h('button', { class: 'hist-toggle', onclick: () => { list.hidden = !list.hidden; btn.classList.toggle('open', !list.hidden); } },
+    icon('recent', 'ico'), h('span', {}, `Previous passwords (${it.history.length})`), h('span', { class: 'home-chev' }, '›'));
+  return h('section', { class: 'card hist' }, btn, list);
+}
+function recordHistory(oldItem, newFields, def) {
+  if (!oldItem) return oldItem;
+  const hist = (oldItem.history || []).slice();
+  for (const [k, label, kind = ''] of def) {
+    if (!kind.includes('secret')) continue;
+    const before = oldItem.fields[k];
+    if (before && before !== newFields[k]) hist.unshift({ k, label, v: before, at: Date.now() });
+  }
+  return hist.slice(0, 20);
+}
+
+// ---------- Import passwords from a CSV export ----------
+function parseCsv(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  text = text.replace(/^\uFEFF/, '');
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; continue; }
+    if (ch === '"') q = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim()));
+}
+function csvToLogins(text) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return [];
+  const head = rows[0].map((c) => c.trim().toLowerCase());
+  const col = (...names) => head.findIndex((c) => names.includes(c));
+  const ci = { title: col('title', 'name'), url: col('url', 'login_uri', 'website', 'web site', 'login url'), user: col('username', 'login_username', 'user name', 'login', 'email'),
+    pw: col('password', 'login_password'), notes: col('notes', 'note', 'extra', 'comments'), type: col('type') };
+  if (ci.pw < 0) return null;
+  const out = [];
+  for (const r of rows.slice(1)) {
+    if (ci.type >= 0 && r[ci.type] && !/login/i.test(r[ci.type])) continue;   // Bitwarden: skip cards, notes etc.
+    const g = (i) => (i >= 0 ? String(r[i] || '').trim() : '');
+    const pw = ci.pw >= 0 ? String(r[ci.pw] || '') : '';
+    const user = g(ci.user), url = g(ci.url);
+    if (!pw && !user) continue;
+    let title = g(ci.title);
+    if (!title) { try { title = new URL(/^https?:/i.test(url) ? url : `https://${url}`).hostname.replace(/^www\./, ''); } catch { title = user || 'Login'; } }
+    const fields = {};
+    if (url) fields.url = url; if (user) fields.username = user; if (pw) fields.password = pw; if (g(ci.notes)) fields.notes = r[ci.notes];
+    out.push({ id: uid(), type: 'login', title, fav: false, fields, files: [], updated: Date.now() });
+  }
+  return out;
+}
+async function importCsv() {
+  const f = await new Promise((res) => {
+    const inp = h('input', { type: 'file', accept: '.csv,text/csv,text/plain', style: 'display:none', onchange: () => { res(inp.files[0]); inp.remove(); } });
+    document.body.append(inp); inp.click();
+  });
+  if (!f) return;
+  const found = csvToLogins(await f.text());
+  if (found === null) return toast('That file has no Password column. Export a CSV from your old password app first.', 'err');
+  const key = (it) => [it.title.toLowerCase(), (it.fields.username || '').toLowerCase(), (it.fields.url || '').toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')].join('|');
+  const have = new Set(state.data.items.filter((it) => it.type === 'login').map(key));
+  const fresh = found.filter((it) => !have.has(key(it)));
+  if (!fresh.length) return toast(found.length ? 'Everything in that file is already in your vault' : 'No logins found in that file');
+  const ok = await confirmBox(`Import ${fresh.length} login${fresh.length > 1 ? 's' : ''}?`,
+    `${found.length - fresh.length ? `${found.length - fresh.length} already in your vault will be skipped. ` : ''}They go into Logins. Afterwards, delete the CSV file — it isn’t encrypted.`, 'Import');
+  if (!ok) return;
+  state.data.items.push(...fresh);
+  await withBusy('Encrypting…', save);
+  go('category', { category: 'login' });
+  toast(`${fresh.length} login${fresh.length > 1 ? 's' : ''} imported`);
+}
+
+// ---------- 6. Renewal reminders in the phone's Calendar (.ics) ----------
+function calendarReminders(items) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const ymd = (d) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+  const esc = (t) => String(t).replace(/[\\;,]/g, (m) => '\\' + m).replace(/\n/g, '\\n');
+  const now = new Date();
+  const ev = items.map((it) => {
+    const e = expiryOf(it);
+    if (!e) return null;
+    let day = new Date(e.date.getFullYear(), e.date.getMonth(), e.date.getDate() - 30);
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    if (day < tomorrow) day = tomorrow;
+    const next = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+    const exp = e.date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+    return ['BEGIN:VEVENT', `UID:oy-${it.id}-${ymd(e.date)}@oy`, `DTSTAMP:${ymd(now)}T000000Z`,
+      `DTSTART;VALUE=DATE:${ymd(day)}`, `DTEND;VALUE=DATE:${ymd(next)}`,
+      `SUMMARY:${esc(`Renew ${it.title}`)}`, `DESCRIPTION:${esc(`${typeDef(it.type).one[0].toUpperCase() + typeDef(it.type).one.slice(1)} expires ${exp}. (Reminder from OY!)`)}`,
+      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(`Renew ${it.title}`)}`, 'TRIGGER:PT9H', 'END:VALARM', 'END:VEVENT'].join('\r\n');
+  }).filter(Boolean);
+  if (!ev.length) return toast('No expiry dates to remind you about', 'err');
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//OY//Only You//EN', 'CALSCALE:GREGORIAN', ...ev, 'END:VCALENDAR'].join('\r\n');
+  if (PREVIEW) return toast('Calendar reminders work in the real app');
+  download(ev.length === 1 ? `Renew ${items[0].title}.ics` : 'OY renewal reminders.ics', ics, 'text/calendar');
+  toast(ev.length === 1 ? 'Opening Calendar — tap Add' : `Opening Calendar — ${ev.length} reminders`);
+}
+
+// ---------- 8. Emergency kit ----------
+VIEWS.kit = () => {
+  const rk = state.kitKey;
+  const who = isDrive() ? state.account.email : 'this device';
+  const link = location.origin + location.pathname.replace(/index\.html$/, '');
+  const sheet = rk && h('div', { class: 'kit-sheet' },
+    h('div', { class: 'kit-head' }, logoMark(), h('div', {}, h('p', { class: 'kit-title' }, 'Emergency kit'), h('p', { class: 'kit-sub' }, `Made ${new Date().toLocaleDateString('en-AU')}${state.data.prefs.name ? ` for ${state.data.prefs.name}` : ''}`))),
+    h('p', {}, 'If something happens to me, or I forget my master password, this sheet gets you into my OY! vault.'),
+    h('ol', { class: 'kit-steps' },
+      h('li', {}, 'On a phone or computer, open ', h('b', {}, link)),
+      h('li', {}, isDrive() ? ['Tap ', h('b', {}, 'Sign in with Google'), ' and use ', h('b', {}, who)] : 'Open OY! on my phone'),
+      h('li', {}, 'On the lock screen tap ', h('b', {}, 'Forgot master password?')),
+      h('li', {}, 'Type the recovery key below, then choose a new master password')),
+    h('div', { class: 'kit-key-label' }, 'Recovery key'),
+    h('div', { class: 'rk kit-key' }, rk),
+    h('p', { class: 'kit-note' }, 'Keep this sheet somewhere safe and private — with your will, or in a home safe. Anyone with it and access to the Google account can open the vault.'));
+  return h('div', { class: 'screen' },
+    topBar('Emergency kit', iconBtn('back', 'Back', () => { state.kitKey = null; go('settings'); }), null),
+    h('div', { class: 'content' },
+      !rk && h('div', { class: 'stack' },
+        h('p', {}, 'A one-page sheet for your family: how to open your vault, with your recovery key.'),
+        h('p', { class: 'muted small' }, 'Making a kit creates a new recovery key. Your old recovery key stops working, so this sheet becomes the one to keep.'),
+        h('button', { class: 'btn gold big', onclick: async () => {
+          if (!(await confirmBox('Make a new emergency kit?', 'Your current recovery key will stop working. The new one will be on the kit.', 'Make kit'))) return;
+          state.kitKey = await withBusy('Creating…', async () => { const k = await C.rotateRecoveryKey(state.file, state.session); await persistKeysOnly(); return k; });
+          render();
+        } }, 'Make my emergency kit')),
+      sheet,
+      rk && h('div', { class: 'row kit-actions' },
+        !PREVIEW && h('button', { class: 'btn gold', onclick: () => window.print() }, 'Print or save as PDF'),
+        h('button', { class: 'btn outline', onclick: () => copy(rk, 'Recovery key copied') }, 'Copy key'))));
+};
+
 function findItem(id) { return state.data.items.find((i) => i.id === id); }
 
 // ---------- Letter badges ----------
@@ -1874,10 +2121,15 @@ function passwordKey(it) {
   const f = itemFields(it).find(([k, label, kind = '']) => kind.includes('secret') && (k === 'password' || /password/i.test(label)));
   return f ? f[0] : null;
 }
+function leaked(it) {
+  const key = passwordKey(it), pw = key && it.fields[key];
+  return !!(pw && it.pwned && it.pwned.n > 0 && it.pwned.len === pw.length && it.pwned.tail === pw.slice(-1));
+}
 function health(it) {
   const key = passwordKey(it);
   const pw = key && it.fields[key];
   if (!pw || it.type === 'rewards') return null;
+  if (leaked(it)) return { level: 'bad', label: 'Leaked', note: `Seen in ${it.pwned.n.toLocaleString()} data breach${it.pwned.n === 1 ? '' : 'es'} — change it` };
   const reused = state.data.items.some((o) => o !== it && passwordKey(o) && o.fields[passwordKey(o)] === pw);
   const s = C.strength(pw);
   if (reused) return { level: 'bad', label: 'Reused', note: 'This password is used somewhere else too' };
@@ -2142,10 +2394,7 @@ function itemRow(it, { showCat = false, from = null } = {}) {
     act('sa-fav', 'fav', it.fav ? 'Unstar' : 'Star', async () => { it.fav = !it.fav; closeSwipe(); render(); await save(); }),
     act('sa-del', 'trash', 'Delete', async () => {
       closeSwipe();
-      if (!(await confirmBox('Delete this item?', `“${it.title}” and any files attached to it will be removed from your vault.`, 'Delete', true))) return;
-      state.data.items = state.data.items.filter((x) => x.id !== it.id);
-      for (const id of attIdsOf(it)) await attRemove(id).catch(() => {});
-      render(); await save(); toast('Deleted');
+      binItem(it); render(); await save(); undoToast(it);
     }));
   const li = h('li', { class: 'row-item swipe' }, actions, front);
 
@@ -2294,12 +2543,10 @@ VIEWS.item = () => {
       !(def.files && it.mode === 'files') &&
         h('div', { class: 'card' }, fieldRows.length ? fieldRows : h('p', { class: 'muted pad' }, 'No details yet.')),
       !(def.files && it.mode === 'files') && fieldRows.length > 0 && h('p', { class: 'tap-hint' }, 'Tap any detail to copy it'),
+      (it.history || []).length > 0 && historyBlock(it),
+      expiryOf(it) && h('button', { class: 'btn outline', onclick: () => calendarReminders([it]) }, icon('recent', 'ico'), 'Add renewal reminder to Calendar'),
       h('button', { class: 'btn danger-outline', onclick: async () => {
-        if (!(await confirmBox('Delete this item?', `“${it.title}” and any files attached to it will be removed from your vault.`, 'Delete', true))) return;
-        state.data.items = state.data.items.filter((x) => x.id !== it.id);
-        go('category', { category: it.type });
-        for (const id of attIdsOf(it)) await attRemove(id).catch(() => {});
-        await save(); toast('Deleted');
+        binItem(it); go('category', { category: state.from || it.type }); await save(); undoToast(it);
       } }, 'Delete item')));
 };
 
@@ -2342,7 +2589,10 @@ VIEWS.edit = () => {
     if (filesOnly) for (const [k, v] of Object.entries(d.fields)) { if (String(v).trim()) fields[k] = v; } // details are hidden, not deleted
     else for (const [k, el] of Object.entries(inputs)) { const v = el.value.trim(); if (v) fields[k] = el.tagName === 'TEXTAREA' ? el.value : v; }
     for (const id of d._removed || []) await attRemove(id).catch(() => {});
+    const before = findItem(d.id);
     const item = { ...d, title: t, fields, files: d.files || [], updated: Date.now() };
+    if (before) item.history = recordHistory(before, fields, itemFields(before));
+    if (before && (item.history || []).some((x) => x.at > Date.now() - 2000 && x.k === passwordKey(before))) delete item.pwned;
     delete item._added; delete item._removed;
     const idx = state.data.items.findIndex((x) => x.id === item.id);
     if (idx >= 0) state.data.items[idx] = item; else state.data.items.push(item);
@@ -2510,8 +2760,11 @@ VIEWS.settings = () => {
         bioRow(),
         rowBtn('Change master password', null, changePw),
         rowBtn('New recovery key', 'Use if you lost the old one', newRecovery),
+        rowBtn('Emergency kit', 'A printable sheet so family can get in if they ever need to', () => go('kit')),
         h('label', { class: 'setting-row static' }, h('span', { class: 'setting-label' }, 'Auto-lock after'), lockSel)),
       section('Backup',
+        rowBtn('Recently deleted', `${(state.data.bin || []).length} item${(state.data.bin || []).length === 1 ? '' : 's'} · kept for ${BIN_DAYS} days`, () => go('bin')),
+        rowBtn('Import passwords', 'From iPhone Passwords, Chrome, Bitwarden, 1Password or LastPass (CSV file)', importCsv),
         rowBtn('Export encrypted backup', 'Opens only with your master password', exportBackup),
         rowBtn('Restore from backup', 'Replaces what is in your vault now', () => restoreBackup({ replacingCurrent: true }))),
       section('This device',

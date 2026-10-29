@@ -1024,3 +1024,53 @@ body:not(.preview) .lift-inner .door-app { padding-top: var(--safe-top); }
 .pw-key { display: flex; gap: 14px; justify-content: center; font-size: .74rem; color: var(--muted); }
 .pw-key b { font-weight: 700; }
 .logo-pick { display: flex; align-items: center; gap: 12px; } .logo-pick-text { flex: 1; display: grid; gap: 2px; min-width: 0; } .logo-pick-prev { display: grid; }
+
+/* ---------- Undo toast ---------- */
+.toast.has-undo { display: flex; align-items: center; gap: 14px; pointer-events: auto; padding: 8px 8px 8px 16px; }
+.toast-undo { border: 0; border-radius: 9px; padding: 7px 12px; font-weight: 700; cursor: pointer; background: var(--gold); color: var(--on-gold); }
+.row-main.static-row { cursor: default; }
+
+/* ---------- Password history ---------- */
+.card.hist { padding: 0 16px; }
+.hist-toggle { width: 100%; display: flex; align-items: center; gap: 10px; padding: 13px 0; border: 0; background: none; cursor: pointer; text-align: left; font-weight: 600; }
+.hist-toggle .ico { width: 18px; height: 18px; color: var(--gold); }
+.hist-toggle span:nth-child(2) { flex: 1; }
+.hist-toggle .home-chev { display: inline; color: var(--muted); font-size: 1.3rem; transition: transform .2s ease; }
+.hist-toggle.open .home-chev { transform: rotate(90deg); }
+.hist-list { display: grid; padding-bottom: 8px; }
+.hist-row { display: grid; gap: 2px; padding: 10px 0; border-top: 1px solid var(--line); }
+.hist-meta { font-size: .78rem; color: var(--muted); }
+.hist-meta b { color: var(--fg); font-weight: 600; }
+.hist-val { display: flex; align-items: center; gap: 4px; justify-content: space-between; }
+.hist-val .field-val { flex: 1; }
+
+/* ---------- Leak check ---------- */
+.hcards.four { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.hcards.four .hcard { padding: 10px 8px; }
+.hcards.four .hcard-note { display: none; }
+.hcard[class*="has"] .hcard-n { color: var(--fg); }
+.breach-box { display: grid; gap: 10px; padding: 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); }
+[data-glass="on"] .breach-box { background: var(--glass); border-color: var(--glass-line); }
+@media (max-width: 360px) { .hcards.four { grid-template-columns: repeat(2, 1fr); } }
+
+/* ---------- Emergency kit ---------- */
+.kit-sheet { display: grid; gap: 12px; padding: 22px 20px; border-radius: 18px; background: #fffdf7; color: #17202e; line-height: 1.5;
+  box-shadow: 0 18px 36px -18px rgba(0,0,0,.6); }
+.kit-sheet .logo-hole { fill: #fffdf7; }
+.kit-head { display: flex; align-items: center; gap: 14px; }
+.kit-head .logo-mark { height: 2.2rem; aspect-ratio: 360 / 178; }
+.kit-title { font: 700 1.3rem/1.2 var(--font-display); margin: 0; }
+.kit-sub { font-size: .8rem; color: #5b6476; margin: 0; }
+.kit-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.kit-steps b { overflow-wrap: anywhere; }
+.kit-key-label { font-size: .7rem; letter-spacing: .14em; text-transform: uppercase; color: #5b6476; font-weight: 700; }
+.kit-key { background: #fff; color: #111; border-color: #c9a24a; font-size: 1.05rem; }
+.kit-note { font-size: .82rem; color: #5b6476; margin: 0; }
+.kit-actions { justify-content: center; }
+@media print {
+  body * { visibility: hidden !important; }
+  .kit-sheet, .kit-sheet * { visibility: visible !important; }
+  .kit-sheet { position: absolute; inset: 0 0 auto 0; box-shadow: none; border-radius: 0; padding: 32px; }
+}
+@media print { .kit-sheet .rk { position: static !important; } }
+.kit-sheet .rk, [data-glass="on"] .kit-sheet .rk { background: #fff !important; color: #111 !important; border: 1.5px solid #c9a24a !important; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
