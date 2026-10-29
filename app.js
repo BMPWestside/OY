@@ -531,9 +531,9 @@ async function linkToDrive(acc) {
   const from = state.account.id;
   let ok = true;
   await withBusy('Moving your vault to Google Drive…', async () => {
-    for (const it of state.data.items) for (const att of it.files || []) {
-      const box = await S.local.get(`${from}:att:${att.id}`);
-      if (box) await S.attPut(acc.id, att.id, box, acc.email);
+    for (const it of state.data.items) for (const id of attIdsOf(it)) {
+      const box = await S.local.get(`${from}:att:${id}`);
+      if (box) await S.attPut(acc.id, id, box, acc.email);
     }
     state.account = acc;
     S.rememberAccount(acc);
@@ -542,7 +542,7 @@ async function linkToDrive(acc) {
   });
   if (!ok) return toast('Moved, but the upload has not finished. It will retry automatically.', 'err');
   // Clean up the old device-only copy now that Drive has it
-  for (const it of state.data.items) for (const att of it.files || []) await S.local.del(`${from}:att:${att.id}`).catch(() => {});
+  for (const it of state.data.items) for (const id of attIdsOf(it)) await S.local.del(`${from}:att:${id}`).catch(() => {});
   await S.local.del(from).catch(() => {});
   try { const b = localStorage.getItem(`oy.bio.${from}`); if (b) { localStorage.setItem(`oy.bio.${acc.id}`, b); localStorage.removeItem(`oy.bio.${from}`); } } catch {}
   render();
@@ -1012,6 +1012,7 @@ async function addFiles(it) {
         const prep = await prepareFile(f);
         const att = { id: uid(), name: prep.name, type: prep.type, size: prep.bytes.length, added: Date.now() };
         await attSave(att.id, prep.bytes);
+        if (att.type === 'application/pdf') await ensurePdfThumb(it, att, false);
         it.files.push(att);
       }
       it.updated = Date.now();
@@ -1058,12 +1059,15 @@ async function openAttachment(it, att) {
     if (!(await confirmBox('Delete this file?', `“${att.name}” will be removed from ${it.title}.`, 'Delete', true))) return;
     close();
     it.files = it.files.filter((x) => x.id !== att.id);
-    await withBusy('Deleting…', async () => { await attRemove(att.id); await save(); });
+    await withBusy('Deleting…', async () => { await attRemove(att.id); if (att.thumbId) await attRemove(att.thumbId).catch(() => {}); await save(); });
     render(); toast('File deleted');
   };
 
+  const pdfPic = isPdf && att.thumbId ? h('img', { class: 'att-full', alt: att.name }) : null;
+  if (pdfPic) attLoad(att.thumbId).then((b) => { pdfPic.src = URL.createObjectURL(new Blob([b], { type: 'image/jpeg' })); }).catch(() => pdfPic.remove());
   const preview = isImg
     ? h('img', { class: 'att-full', src: url, alt: att.name })
+    : pdfPic ? h('div', { class: 'att-pdf' }, pdfPic, !PREVIEW && h('a', { class: 'btn outline', href: url, target: '_blank', rel: 'noopener' }, 'Open full PDF'))
     : h('div', { class: 'att-pdf' }, icon('document', 'ico ico-xl'), h('p', {}, att.name),
         isPdf && !PREVIEW && h('a', { class: 'btn outline', href: url, target: '_blank', rel: 'noopener' }, 'Open PDF'));
   const closeAll = modal(att.name, preview, (close) => [
@@ -1076,12 +1080,85 @@ async function openAttachment(it, att) {
   void closeAll;
 }
 
+// ---------- PDF previews: render page 1 on the phone (pdf.js), trim the margins, keep it encrypted ----------
+const attIdsOf = (it) => (it.files || []).flatMap((a) => (a.thumbId ? [a.id, a.thumbId] : [a.id]));
+let pdfjsLib = null;
+async function loadPdfJs() {
+  if (pdfjsLib) return pdfjsLib;
+  const base = new URL('vendor/pdfjs/', document.baseURI).href;
+  const lib = await import(base + 'pdf.mjs');
+  lib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.mjs';
+  return (pdfjsLib = lib);
+}
+async function pdfPreview(bytes) {
+  const lib = await loadPdfJs();
+  const doc = await lib.getDocument({ data: bytes.slice(0), isEvalSupported: false, disableFontFace: true }).promise;
+  try {
+    const page = await doc.getPage(1);
+    const v1 = page.getViewport({ scale: 1 });
+    const scale = Math.min(3, 1600 / Math.max(v1.width, v1.height));
+    const vp = page.getViewport({ scale });
+    const c = document.createElement('canvas');
+    c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    // trim the white page around a scanned card
+    const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+    let x0 = width, y0 = height, x1 = -1, y1 = -1;
+    const step = 2;
+    for (let y = 0; y < height; y += step) for (let x = 0; x < width; x += step) {
+      const i = (y * width + x) * 4;
+      if (data[i] < 236 || data[i + 1] < 236 || data[i + 2] < 236) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    }
+    let out = c;
+    if (x1 > x0 && y1 > y0 && (x1 - x0) * (y1 - y0) > width * height * 0.02) {
+      const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.02);
+      x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(width, x1 + pad); y1 = Math.min(height, y1 + pad);
+      out = document.createElement('canvas'); out.width = x1 - x0; out.height = y1 - y0;
+      out.getContext('2d').drawImage(c, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    }
+    const blob = await new Promise((r) => out.toBlob(r, 'image/jpeg', 0.88));
+    return new Uint8Array(await blob.arrayBuffer());
+  } finally { doc.destroy(); }
+}
+/** Make (once) and save an encrypted preview picture for a PDF attachment. */
+const thumbJobs = new Map();
+function ensurePdfThumb(it, att, persist = true) {
+  if (att.thumbId || att.type !== 'application/pdf' || PREVIEW) return Promise.resolve(att.thumbId || null);
+  if (att.noThumb) return Promise.resolve(null);
+  if (thumbJobs.has(att.id)) return thumbJobs.get(att.id);
+  const job = (async () => {
+    try {
+      const jpg = await pdfPreview(await attLoad(att.id));
+      const tid = uid();
+      await attSave(tid, jpg);
+      att.thumbId = tid;
+      if (persist) await save();
+      return tid;
+    } catch (e) { console.warn('PDF preview failed', e); return null; }
+  })();
+  thumbJobs.set(att.id, job);
+  return job;
+}
+/** The picture to show for an item: a photo, or the preview of a PDF. Resolves to { id, type } or null. */
+async function frontPicture(it) {
+  const files = it.files || [];
+  const img = files.find((a) => a.type.startsWith('image/'));
+  if (img) return { id: img.id, type: img.type };
+  for (const a of files) if (a.type === 'application/pdf') {
+    const tid = await ensurePdfThumb(it, a);
+    if (tid) return { id: tid, type: 'image/jpeg' };
+  }
+  return null;
+}
+
 function thumbTile(att, onclick) {
   const tile = h('button', { type: 'button', class: 'att-tile', 'aria-label': `Open ${att.name}`, onclick },
-    att.type.startsWith('image/') ? h('span', { class: 'att-thumb loading' }) : h('span', { class: 'att-thumb pdf' }, icon('document'), 'PDF'));
-  if (att.type.startsWith('image/')) {
-    attLoad(att.id).then((bytes) => {
-      const url = URL.createObjectURL(new Blob([bytes], { type: att.type }));
+    att.type.startsWith('image/') || att.thumbId ? h('span', { class: 'att-thumb loading' }, att.thumbId ? h('span', { class: 'pdf-tag' }, 'PDF') : null) : h('span', { class: 'att-thumb pdf' }, icon('document'), 'PDF'));
+  if (att.type.startsWith('image/') || att.thumbId) {
+    attLoad(att.thumbId || att.id).then((bytes) => {
+      const url = URL.createObjectURL(new Blob([bytes], { type: att.thumbId ? 'image/jpeg' : att.type }));
       const span = tile.querySelector('.att-thumb');
       span.classList.remove('loading');
       span.style.backgroundImage = `url("${url}")`;
@@ -1100,8 +1177,9 @@ function draftAttachments(d) {
       thumbTile(att, () => {}),
       h('button', { type: 'button', class: 'att-x', 'aria-label': `Remove ${att.name}`, onclick: async () => {
         d.files = d.files.filter((x) => x.id !== att.id);
-        if (d._added.includes(att.id)) { d._added = d._added.filter((x) => x !== att.id); attRemove(att.id).catch(() => {}); }
-        else d._removed.push(att.id);
+        const ids = att.thumbId ? [att.id, att.thumbId] : [att.id];
+        if (d._added.includes(att.id)) { d._added = d._added.filter((x) => !ids.includes(x)); ids.forEach((id) => attRemove(id).catch(() => {})); }
+        else d._removed.push(...ids);
         draw();
       } }, '×')));
     const add = async () => {
@@ -1113,6 +1191,7 @@ function draftAttachments(d) {
             const prep = await prepareFile(f);
             const att = { id: uid(), name: prep.name, type: prep.type, size: prep.bytes.length, added: Date.now() };
             await attSave(att.id, prep.bytes);
+            if (att.type === 'application/pdf') { await ensurePdfThumb(d, att, false); if (att.thumbId) d._added.push(att.thumbId); }
             d.files.push(att); d._added.push(att.id);
           }
         });
@@ -1486,7 +1565,7 @@ async function deleteCategory(c) {
   document.querySelectorAll('.overlay').forEach((o) => o.remove());
   const msg = items.length ? `${c.label} and the ${items.length} item${items.length > 1 ? 's' : ''} in it will be deleted.` : `${c.label} will be removed.`;
   if (!(await confirmBox('Delete category?', msg, 'Delete', true))) return;
-  for (const it of items) for (const att of it.files || []) await attRemove(att.id).catch(() => {});
+  for (const it of items) for (const id of attIdsOf(it)) await attRemove(id).catch(() => {});
   state.data.items = state.data.items.filter((it) => it.type !== c.id);
   state.data.prefs.custom = customCats().filter((x) => x.id !== c.id);
   go('vault'); await save(); toast('Category deleted');
@@ -1720,6 +1799,26 @@ function cardFace(it) {
   return h('div', { class: 'face-wrap' }, face, digits && h('p', { class: 'face-hint' }, 'Tap the card to show the full number'));
 }
 const ID_TITLES = { passport: 'PASSPORT', licence: 'DRIVER LICENCE', medicare: 'MEDICARE', document: 'DOCUMENT' };
+// The real document (photo, or PDF page 1) when there is one; otherwise the drawn ID card
+function docFront(it) {
+  const hasFile = (it.files || []).some((a) => a.type.startsWith('image/') || a.type === 'application/pdf');
+  const fallback = ID_TITLES[it.type] ? idCard(it) : null;
+  if (!hasFile) return fallback;
+  const box = h('button', { class: 'doc-front loading', 'aria-label': 'Open the document' });
+  const holder = h('div', { class: 'doc-front-wrap' }, box);
+  frontPicture(it).then(async (pic) => {
+    if (!pic) throw new Error('none');
+    const bytes = await attLoad(pic.id);
+    const url = URL.createObjectURL(new Blob([bytes], { type: pic.type }));
+    const img = h('img', { src: url, alt: `${it.title}` });
+    box.replaceChildren(img, expiryTag(it) || '');
+    box.classList.remove('loading');
+    const att = (it.files || []).find((a) => a.id === pic.id || a.thumbId === pic.id);
+    box.onclick = () => att && openAttachment(it, att);
+  }).catch(() => { if (holder.isConnected) holder.replaceWith(fallback || ''); });
+  return holder;
+}
+
 function idCard(it) {
   const f = it.fields;
   const img = (it.files || []).find((a) => a.type.startsWith('image/'));
@@ -1829,16 +1928,18 @@ function logoEl(it, fallback, cls = 'site-logo') {
 }
 
 function rowLead(it, showCat) {
-  const img = typeDef(it.type).files && (it.files || []).find((a) => a.type.startsWith('image/'));
-  if (img) {
+  const plain = showCat ? catIcon(typeIcon(it.type), 'ico row-cat') : avatar(it);
+  const files = typeDef(it.type).files ? (it.files || []) : [];
+  if (files.some((a) => a.type.startsWith('image/') || a.type === 'application/pdf')) {
     const t = h('span', { class: 'row-thumb loading', 'aria-hidden': 'true' });
-    attLoad(img.id).then((bytes) => {
-      t.style.backgroundImage = `url("${URL.createObjectURL(new Blob([bytes], { type: img.type }))}")`;
+    frontPicture(it).then(async (pic) => {
+      if (!pic) throw new Error('none');
+      const bytes = await attLoad(pic.id);
+      t.style.backgroundImage = `url("${URL.createObjectURL(new Blob([bytes], { type: pic.type }))}")`;
       t.classList.remove('loading');
-    }).catch(() => { t.replaceWith(showCat ? catIcon(typeIcon(it.type), 'ico row-cat') : avatar(it)); });
+    }).catch(() => { if (t.isConnected) t.replaceWith(logoEl(it, plain)); });
     return t;
   }
-  const plain = showCat ? catIcon(typeIcon(it.type), 'ico row-cat') : avatar(it);
   return logoEl(it, plain);
 }
 
@@ -1865,7 +1966,7 @@ function itemRow(it, { showCat = false, from = null } = {}) {
       closeSwipe();
       if (!(await confirmBox('Delete this item?', `“${it.title}” and any files attached to it will be removed from your vault.`, 'Delete', true))) return;
       state.data.items = state.data.items.filter((x) => x.id !== it.id);
-      for (const att of it.files || []) await attRemove(att.id).catch(() => {});
+      for (const id of attIdsOf(it)) await attRemove(id).catch(() => {});
       render(); await save(); toast('Deleted');
     }));
   const li = h('li', { class: 'row-item swipe' }, actions, front);
@@ -2006,7 +2107,7 @@ VIEWS.item = () => {
           it.fav = !it.fav; render(); await save();
         } }, it.fav ? '★' : '☆')),
       it.type === 'card' && cardFace(it),
-      ID_TITLES[it.type] && idCard(it),
+      (ID_TITLES[it.type] || typeDef(it.type).files) && docFront(it),
       def.files && modeToggle(it.mode || 'details', async (m) => { it.mode = m; render(); await save(); }),
       def.files && attachmentsBlock(it),
       !(def.files && it.mode === 'files') &&
@@ -2016,7 +2117,7 @@ VIEWS.item = () => {
         if (!(await confirmBox('Delete this item?', `“${it.title}” and any files attached to it will be removed from your vault.`, 'Delete', true))) return;
         state.data.items = state.data.items.filter((x) => x.id !== it.id);
         go('category', { category: it.type });
-        for (const att of it.files || []) await attRemove(att.id).catch(() => {});
+        for (const id of attIdsOf(it)) await attRemove(id).catch(() => {});
         await save(); toast('Deleted');
       } }, 'Delete item')));
 };
@@ -2160,8 +2261,8 @@ VIEWS.settings = () => {
     const attachments = {};
     try {
       await withBusy('Preparing backup…', async () => {
-        for (const it of state.data.items) for (const att of it.files || []) {
-          attachments[att.id] = state.account.id === 'sample' ? memAtt.get(att.id) : await S.attGet(state.account.id, att.id, hint());
+        for (const it of state.data.items) for (const id of attIdsOf(it)) {
+          attachments[id] = state.account.id === 'sample' ? memAtt.get(id) : await S.attGet(state.account.id, id, hint());
         }
       });
     } catch { return toast('Could not fetch all files — check your connection', 'err'); }

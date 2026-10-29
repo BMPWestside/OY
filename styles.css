@@ -999,3 +999,15 @@ body:not(.preview) .lift-inner .door-app { padding-top: var(--safe-top); }
 .site-logo:not(.ok) { background: var(--surface-2); }
 .site-logo.big { width: 56px; height: 56px; border-radius: 16px; }
 .site-logo.big img { padding: 0; }
+
+/* ---------- Real document front (photo or PDF page 1) ---------- */
+.doc-front-wrap { display: grid; justify-items: center; }
+.doc-front { position: relative; padding: 0; border: 0; background: none; cursor: zoom-in; width: 100%; max-width: 380px; border-radius: 16px; overflow: hidden;
+  box-shadow: 0 18px 36px -16px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08); }
+.doc-front img { display: block; width: 100%; height: auto; max-height: 300px; object-fit: contain; background: #fff; }
+.doc-front.loading { aspect-ratio: 1.586; background: var(--surface-2); animation: pulse 1.2s infinite; }
+.doc-front .tag { position: absolute; top: 10px; right: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+.pdf-tag { position: absolute; left: 6px; bottom: 6px; font-size: .62rem; font-weight: 800; letter-spacing: .06em; padding: 2px 6px; border-radius: 6px; background: rgba(0,0,0,.6); color: #fff; }
+.att-thumb { position: relative; }
+.att-pdf .att-full { margin-bottom: 4px; }
+.att-pdf .btn { text-decoration: none; }
