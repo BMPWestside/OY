@@ -91,6 +91,14 @@ const ICON_PATHS = {
   lock: '<rect x="4.5" y="10.5" width="15" height="10.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
   back: '<path d="m15 5-7 7 7 7"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  eye: '<path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M3 3l18 18M10.6 5.6A9.7 9.7 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3 3.8M6.6 6.6C4 8.3 2.5 12 2.5 12s3.5 6.5 9.5 6.5c1.6 0 3-.4 4.3-1M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
+  external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/>',
+  trash: '<path d="M4.5 7h15M10 11v5M14 11v5M6 7l1 12a1.5 1.5 0 0 0 1.5 1.4h7A1.5 1.5 0 0 0 17 19l1-12M9 7V4.8c0-.4.4-.8.8-.8h4.4c.4 0 .8.4.8.8V7"/>',
+  heartPulse: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/><path d="M7.5 12.2h2.5l1.2-2.4 1.8 4.6 1.2-2.2h2.3"/>',
   all: '<rect x="3.5" y="8" width="17" height="12.5" rx="2"/><path d="M5.5 5.2h13M7.5 2.8h9"/>',
   fav: '<path d="m12 3.6 2.5 5.1 5.6.8-4 4 1 5.6-5.1-2.7-5 2.7 1-5.6-4.1-4 5.6-.8z"/>',
   recent: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 2"/>',
@@ -209,7 +217,7 @@ function logoMark() {
   span.setAttribute('aria-hidden', 'true');
   span.innerHTML = `<svg viewBox="68 160 360 178"><g transform="translate(256 256) scale(.86) translate(-276 -256)">
     <circle cx="168" cy="256" r="106" fill="url(#oyLogo)"/>
-    <circle cx="168" cy="232" r="30" class="logo-hole"/><path d="M153 246 h30 l12 66 h-54z" class="logo-hole"/>
+    <g class="logo-key"><circle cx="168" cy="232" r="30" class="logo-hole"/><path d="M153 246 h30 l12 66 h-54z" class="logo-hole"/></g>
     <path d="M276 170 L336 256 L396 170 M336 256 V342" fill="none" stroke="url(#oyLogo)" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
     <rect x="434" y="170" width="36" height="120" rx="18" fill="url(#oyLogo)"/><circle cx="452" cy="326" r="20" fill="url(#oyLogo)"/>
   </g></svg>`;
@@ -389,6 +397,8 @@ document.addEventListener('pointerdown', (e) => {
 
 // ---------------- Navigation ----------------
 function go(screen, extra = {}) {
+  document.querySelectorAll('.overlay').forEach((o) => o.remove());
+  openSwipe = null;
   Object.assign(state, { screen }, extra);
   render();
   window.scrollTo(0, 0);
@@ -560,6 +570,26 @@ function normaliseData(d) {
     }
     if (!TYPES[it.type] && !(d.prefs.custom || []).some((c) => c.id === it.type)) it.type = 'note';
     it.files = Array.isArray(it.files) ? it.files : [];
+  }
+  // Old versions changed fields for a whole category. Move those changes onto the items that use them,
+  // so a field added for one item no longer shows on every other item.
+  if (d.prefs.fields && typeof d.prefs.fields === 'object') {
+    for (const [cat, list] of Object.entries(d.prefs.fields)) {
+      const base = (TYPES[cat] || (d.prefs.custom || []).some((c) => c.id === cat) ? (TYPES[cat] ? TYPES[cat].fields : CUSTOM_FIELDS) : null);
+      if (!base || !Array.isArray(list)) continue;
+      const baseKeys = new Set(base.map(([k]) => k));
+      for (const it of d.items) {
+        if (it.type !== cat || Array.isArray(it.fieldList)) continue;
+        const extras = list.filter(([k]) => !baseKeys.has(k) && String(it.fields[k] || '').trim());
+        const kept = list.filter(([k]) => baseKeys.has(k));
+        const missing = base.filter(([k]) => !kept.some(([x]) => x === k) && String(it.fields[k] || '').trim());
+        const changed = extras.length || missing.length || kept.length !== base.length || kept.some(([k, l, kind = ''], i) => {
+          const o = base.find(([x]) => x === k); return !o || o[1] !== l || (o[2] || '') !== (kind || '');
+        });
+        if (changed) it.fieldList = [...kept, ...missing, ...extras];
+      }
+    }
+    delete d.prefs.fields;
   }
   return d;
 }
@@ -762,7 +792,9 @@ VIEWS.unlock = () => {
     }
     showPassword();
   } }, bigLock());
-  return h('main', { class: 'unlock-screen' },
+  const intro = !state.introShown && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  state.introShown = true;
+  return h('main', { class: `unlock-screen ${intro ? 'intro' : ''}` },
     h('div', { class: 'unlock-top' }, logo('lg')),
     h('div', { class: 'unlock-mid' }, lockBtn, hint, panel),
     h('div', { class: 'unlock-foot' },
@@ -1066,12 +1098,14 @@ VIEWS.vault = () => {
       onpointerup: () => clearTimeout(pressTimer),
       onpointerleave: () => clearTimeout(pressTimer),
       oncontextmenu: (e) => e.preventDefault()
-    }, h('span', { class: 'home-icon', style: `--c:${COLOURS[k]}` }, catIcon(k, 'ico ico-home', { onTile: true })),
+    }, h('span', { class: 'home-icon', style: `--c:${COLOURS[k]}` }, catIcon(k, 'ico ico-home', { onTile: true }),
+        counts[k] ? h('span', { class: 'home-badge' }, counts[k] > 99 ? '99+' : counts[k]) : null),
       h('span', { class: 'home-label' }, k === 'more' ? 'More' : SPECIAL[k] || (listView ? TYPES[k].label : SHORT[k])),
       h('span', { class: 'home-count' }, counts[k] || ''), h('span', { class: 'home-chev' }, '›'));
     return el;
   };
   const grid = h('nav', { class: `home-grid ${listView ? 'as-list' : ''} ${arranging ? 'arranging' : ''}`, 'aria-label': 'Vault',
+    onpointerdown: (e) => { if (!state.arranging) pull.start(e); },
     style: `--rows:${listView ? order.length : Math.ceil(order.length / 3)}` }, order.map(tile));
 
   // drag to reorder: tiles swap places as your finger passes over them
@@ -1105,15 +1139,8 @@ VIEWS.vault = () => {
     : iconBtn('settings', 'Settings', () => go('settings'));
   return h('div', { class: 'screen home' },
     topBar(arranging ? 'Drag to rearrange' : logo('sm'), left, right),
-    !arranging && (() => {
-      const exp = expiringItems();
-      if (!exp.length) return null;
-      const expired = exp.filter((it) => expiryOf(it).status === 'expired').length;
-      return h('button', { class: `exp-strip ${expired ? 'has-expired' : ''}`, onclick: () => go('category', { category: 'expiring', from: null }) },
-        icon('expiring', 'ico'), h('span', { class: 'exp-text' },
-          expired ? `${expired} expired${exp.length > expired ? `, ${exp.length - expired} expiring soon` : ''}` : `${exp.length} expiring soon`),
-        h('span', { class: 'home-chev' }, '›'));
-    })(),
+    !arranging && h('div', { class: `pull-hint ${(() => { try { return localStorage.getItem('oy.pulled') ? '' : 'first'; } catch { return ''; } })()}`, 'aria-hidden': 'true' }, icon('search', 'ico'), h('span', { class: 'ph-a' }, 'Pull down to search'), h('span', { class: 'ph-b' }, 'Let go to search')),
+    !arranging && homeHeader(),
     grid,
     arranging && h('button', { class: 'btn link subtle reset-order', onclick: () => { state.arranging = [...HOME_KEYS]; render(); } }, 'Reset to original order'));
 };
@@ -1125,6 +1152,33 @@ function setHomeView(v) {
   try { localStorage.setItem('oy.homeView', v); } catch {}
   state.data.prefs.homeView = v; render(); save();
 }
+// Pull the home screen down to search
+const pull = {
+  y0: null, x0: 0, dy: 0,
+  start(e) { this.y0 = e.clientY; this.x0 = e.clientX; this.dy = 0;
+    const mv = (ev) => this.move(ev), up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); this.end(); };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up); },
+  move(e) {
+    if (this.y0 === null) return;
+    const dy = e.clientY - this.y0, dx = e.clientX - this.x0;
+    if (dy < 12 || Math.abs(dx) > dy) return;
+    this.dy = dy;
+    document.querySelectorAll('.home-tile').forEach((t) => t.dispatchEvent(new Event('pointerleave'))); // stop press-and-hold
+    const g = document.querySelector('.home-grid'), hint = document.querySelector('.pull-hint');
+    const d = Math.min(110, dy * 0.45);
+    if (g) { g.style.transition = 'none'; g.style.transform = `translateY(${d}px)`; }
+    if (hint) { hint.classList.add('show'); hint.classList.toggle('ready', dy > 120); hint.style.transform = `translateY(${d * 0.6}px)`; }
+  },
+  end() {
+    const g = document.querySelector('.home-grid'), hint = document.querySelector('.pull-hint');
+    if (g) { g.style.transition = 'transform .3s cubic-bezier(.2,.8,.2,1)'; g.style.transform = ''; }
+    if (hint) { hint.classList.remove('show', 'ready'); hint.style.transform = ''; }
+    const go2 = this.dy > 120;
+    if (this.dy > 12) document.querySelectorAll('.home-tile').forEach((t) => { t.dataset.longpressed = '1'; setTimeout(() => delete t.dataset.longpressed, 80); });
+    this.y0 = null; this.dy = 0;
+    if (go2) { buzz(10); openSearch(); }
+  }
+};
 function startArrange() { state.arranging = homeOrder(); render(); toast('Drag icons to move them, then tap Done'); }
 async function finishArrange() {
   state.data.prefs.order = state.arranging;
@@ -1235,9 +1289,14 @@ function themeDropdown() {
 // ---------- Field editor (per category) ----------
 const KIND_LABEL = { '': 'Text', secret: 'Hidden', multi: 'Long text' };
 const KIND_NEXT = { '': 'secret', secret: 'multi', multi: '' };
-function fieldEditor(k) {
-  const def = typeDef(k);
-  let rows = def.fields.map(([key, label, kind = '']) => ({ key, label, kind: kind.includes('multi') ? 'multi' : kind.includes('secret') ? 'secret' : '' }));
+// Fields belong to one item: an item can add, rename, retype, reorder or remove its own fields
+// without changing any other item. Items that were never customised use their category's fields.
+function itemFields(it) {
+  return Array.isArray(it.fieldList) ? it.fieldList : typeDef(it.type).fields;
+}
+const kindOf = (kind = '') => (kind.includes('multi') ? 'multi' : kind.includes('secret') ? 'secret' : '');
+function fieldEditor(d, onDone) {
+  let rows = itemFields(d).map(([key, label, kind = '']) => ({ key, label, kind: kindOf(kind) }));
   const listEl = h('div', { class: 'fe-list' });
   const draw = () => {
     listEl.replaceChildren(...rows.map((r, i) => {
@@ -1258,11 +1317,12 @@ function fieldEditor(k) {
     const last = listEl.querySelector('.fe-row:last-child .fe-name'); if (last) last.focus();
   } }, '+ Add field');
   const reset = h('button', { type: 'button', class: 'btn link subtle', onclick: () => {
-    rows = baseDef(k).fields.map(([key, label, kind = '']) => ({ key, label, kind: kind.includes('multi') ? 'multi' : kind.includes('secret') ? 'secret' : '' }));
+    rows = typeDef(d.type).fields.map(([key, label, kind = '']) => ({ key, label, kind: kindOf(kind) }));
     draw();
-  } }, 'Reset to original fields');
-  modal(`${def.label} fields`, h('div', { class: 'stack' },
-    h('p', { class: 'muted small' }, `Changes apply to all ${def.label.toLowerCase()}. Tap the type to switch between Text, Hidden (shown as dots) and Long text.`),
+  } }, 'Reset to the usual fields');
+  const name = (d.title || '').trim() || `this ${typeDef(d.type).one}`;
+  modal('Fields', h('div', { class: 'stack' },
+    h('p', { class: 'muted small' }, `Changes apply to ${name} only. Tap the type to switch between Text, Hidden (shown as dots) and Long text.`),
     listEl, addBtn, reset),
   (close) => [
     h('button', { class: 'btn ghost', onclick: close }, 'Cancel'),
@@ -1270,17 +1330,15 @@ function fieldEditor(k) {
       rows = rows.map((r) => ({ ...r, label: r.label.trim() }));
       if (rows.some((r) => !r.label)) return toast('Give every field a name, or delete the empty one', 'err');
       const keep = new Set(rows.map((r) => r.key));
-      const removed = def.fields.map(([key]) => key).filter((key) => !keep.has(key));
-      const affected = state.data.items.filter((it) => it.type === k && removed.some((key) => it.fields[key]));
-      if (affected.length) {
+      const removed = itemFields(d).map(([key]) => key).filter((key) => !keep.has(key) && String(d.fields[key] || '').trim());
+      if (removed.length) {
         close();
-        if (!(await confirmBox('Delete fields?', `What you saved in the deleted field${removed.length > 1 ? 's' : ''} will be removed from ${affected.length} item${affected.length > 1 ? 's' : ''}.`, 'Delete', true))) return;
+        if (!(await confirmBox('Delete fields?', `What you typed in the deleted field${removed.length > 1 ? 's' : ''} will be removed when you save.`, 'Delete', true))) return;
       } else close();
-      for (const it of state.data.items) if (it.type === k) for (const key of removed) delete it.fields[key];
-      if (state.draft && state.draft.type === k) for (const key of removed) delete state.draft.fields[key];
-      state.data.prefs.fields = { ...(state.data.prefs.fields || {}), [k]: rows.map((r) => [r.key, r.label, r.kind]) };
-      render(); await save(); toast('Fields saved');
-    } }, 'Save')
+      for (const key of itemFields(d).map(([k]) => k)) if (!keep.has(key)) delete d.fields[key];
+      d.fieldList = rows.map((r) => [r.key, r.label, r.kind]);
+      onDone && onDone();
+    } }, 'Done')
   ]);
 }
 
@@ -1335,8 +1393,75 @@ async function deleteCategory(c) {
 }
 
 // ---------- Category list ----------
+// ---------- Vault health ----------
+function vaultHealth() {
+  const items = state.data.items;
+  const pw = items.map((it) => ({ it, hl: health(it) })).filter((x) => x.hl);
+  const weak = pw.filter((x) => x.hl.label === 'Weak').map((x) => x.it);
+  const reused = pw.filter((x) => x.hl.label === 'Reused').map((x) => x.it);
+  const okay = pw.filter((x) => x.hl.label === 'Okay').map((x) => x.it);
+  const dated = items.filter((it) => expiryOf(it));
+  const expiring = expiringItems();
+  const expired = expiring.filter((it) => expiryOf(it).status === 'expired');
+  const checks = pw.length + dated.length;
+  const bad = weak.length + reused.length + okay.length * 0.4 + expired.length + (expiring.length - expired.length) * 0.5;
+  const score = checks ? Math.max(0, Math.min(100, Math.round(100 * (1 - bad / checks)))) : 100;
+  return { score, checks, weak, reused, okay, expiring, toFix: weak.length + reused.length + expiring.length };
+}
+function scoreRing(score, size = 140) {
+  const r = 52, c = 2 * Math.PI * r;
+  const col = score >= 80 ? '#2fb872' : score >= 50 ? '#f0b429' : '#e5484d';
+  const w = document.createElement('span');
+  w.className = 'score-ring';
+  w.style.width = w.style.height = size + 'px';
+  w.innerHTML = `<svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="${r}" fill="none" stroke="currentColor" stroke-opacity=".12" stroke-width="10"/>
+    <circle class="score-arc" cx="60" cy="60" r="${r}" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round"
+      stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - score / 100)}" transform="rotate(-90 60 60)" style="--c:${c}"/></svg>
+    <span class="score-num">${score}<small>%</small></span>`;
+  return w;
+}
+function homeHeader() {
+  const name = (state.data.prefs.name || '').trim();
+  const hr = new Date().getHours();
+  const hello = hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
+  const vh = vaultHealth();
+  const strip = vh.checks > 0 && h('button', { class: `health-strip ${vh.score >= 80 ? 'good' : vh.score >= 50 ? 'mid' : 'bad'}`, onclick: () => go('category', { category: 'health', from: null }) },
+    scoreRing(vh.score, 30),
+    h('span', { class: 'hs-text' }, h('b', {}, `Vault health ${vh.score}%`), h('span', {}, vh.toFix ? ` · ${vh.toFix} to fix` : ' · All good')),
+    h('span', { class: 'home-chev' }, '›'));
+  if (!name && !strip) return null;
+  return h('div', { class: 'home-head' },
+    name && h('p', { class: 'greeting' }, `${hello}, `, h('span', {}, name)),
+    strip);
+}
+function healthView() {
+  const vh = vaultHealth();
+  const tab = state.healthTab || (vh.weak.length ? 'weak' : vh.reused.length ? 'reused' : 'expiring');
+  const lists = { weak: vh.weak, reused: vh.reused, expiring: vh.expiring };
+  const card = (key, label, ic, note) => h('button', { class: `hcard ${tab === key ? 'on' : ''} ${lists[key].length ? 'has' : ''}`,
+    onclick: () => { state.healthTab = key; render(); } },
+    icon(ic, 'ico'), h('span', { class: 'hcard-n' }, lists[key].length), h('span', { class: 'hcard-l' }, label), h('span', { class: 'hcard-note' }, note));
+  const verdict = vh.score >= 90 ? 'Excellent' : vh.score >= 80 ? 'Looking good' : vh.score >= 50 ? 'A few things to fix' : 'Needs attention';
+  const rows = lists[tab];
+  const tips = { weak: 'Open each one, tap Edit, then Generate a new password.', reused: 'Give each account its own password, so one leak can’t unlock the others.', expiring: 'Renew these, then update the expiry date here.' };
+  return h('div', { class: 'screen' },
+    topBar('Vault health', iconBtn('back', 'Back', () => go('vault')), null),
+    h('div', { class: 'content' },
+      h('div', { class: 'health-hero' }, scoreRing(vh.score, 150),
+        h('p', { class: 'health-verdict' }, verdict),
+        h('p', { class: 'muted small' }, vh.checks ? `Based on ${vh.checks} password${vh.checks === 1 ? '' : 's'} and expiry dates` : 'Add logins and IDs to see your score')),
+      h('div', { class: 'hcards' },
+        card('weak', 'Weak', 'login', 'Easy to guess'),
+        card('reused', 'Reused', 'copy', 'Same password twice'),
+        card('expiring', 'Expiring', 'expiring', 'Within 3 months')),
+      rows.length
+        ? [h('p', { class: 'tap-hint left' }, tips[tab]), h('ul', { class: 'list' }, rows.map((it) => itemRow(it, { showCat: true, from: 'health' })))]
+        : h('div', { class: 'empty' }, h('p', { class: 'muted' }, tab === 'expiring' ? 'Nothing is expiring soon.' : `No ${tab} passwords. Nice work.`))));
+}
+
 VIEWS.category = () => {
   const k = state.category;
+  if (k === 'health') return healthView();
   if (SPECIAL[k]) return specialView(k);
   const def = typeDef(k);
   const custom = customCats().find((c) => c.id === k);
@@ -1351,7 +1476,7 @@ VIEWS.category = () => {
       rows.length
         ? h('ul', { class: 'list' }, rows.map((it) => itemRow(it)))
         : emptyState(k, def.label, add),
-      h('button', { class: 'btn link subtle edit-fields', onclick: () => fieldEditor(k) }, 'Edit fields')),
+      null),
     h('button', { class: 'fab', 'aria-label': `Add ${def.one}`, onclick: add }, icon('plus', 'ico ico-fab')));
 };
 
@@ -1404,8 +1529,7 @@ function expiringItems() {
 
 // ---------- Password health ----------
 function passwordKey(it) {
-  const def = typeDef(it.type);
-  const f = def.fields.find(([k, label, kind = '']) => kind.includes('secret') && (k === 'password' || /password/i.test(label)));
+  const f = itemFields(it).find(([k, label, kind = '']) => kind.includes('secret') && (k === 'password' || /password/i.test(label)));
   return f ? f[0] : null;
 }
 function health(it) {
@@ -1508,17 +1632,112 @@ function emptyState(k, label, onAdd) {
     onAdd && h('button', { class: 'btn gold', onclick: onAdd }, '+ Add your first'));
 }
 
+// List rows: tap to open; swipe left for Copy / Favourite / Delete
+let openSwipe = null;
+function closeSwipe() { if (openSwipe) { openSwipe(); openSwipe = null; } }
+document.addEventListener('pointerdown', (e) => { if (openSwipe && !e.target.closest('.row-item.open')) closeSwipe(); }, true);
+
+function rowLead(it, showCat) {
+  const img = typeDef(it.type).files && (it.files || []).find((a) => a.type.startsWith('image/'));
+  if (img) {
+    const t = h('span', { class: 'row-thumb loading', 'aria-hidden': 'true' });
+    attLoad(img.id).then((bytes) => {
+      t.style.backgroundImage = `url("${URL.createObjectURL(new Blob([bytes], { type: img.type }))}")`;
+      t.classList.remove('loading');
+    }).catch(() => { t.replaceWith(showCat ? catIcon(typeIcon(it.type), 'ico row-cat') : avatar(it)); });
+    return t;
+  }
+  return showCat ? catIcon(typeIcon(it.type), 'ico row-cat') : avatar(it);
+}
+
 function itemRow(it, { showCat = false, from = null } = {}) {
-  const quick = ['login', 'email', 'wifi'].includes(it.type) ? it.fields.password : null;
-  return h('li', { class: 'row-item' },
-    h('button', { class: 'row-main', onclick: () => go('item', { itemId: it.id, from }) },
-      showCat ? catIcon(typeIcon(it.type), 'ico row-cat') : avatar(it),
+  const pk = passwordKey(it);
+  const pw = pk && it.fields[pk];
+  const quick = ['login', 'email', 'wifi'].includes(it.type) ? pw : null;
+  let dragged = false;
+  const front = h('div', { class: 'row-front' },
+    h('button', { class: 'row-main', onclick: () => { if (dragged) return; go('item', { itemId: it.id, from }); } },
+      rowLead(it, showCat),
       h('span', { class: 'row-text' },
         h('span', { class: 'row-title' }, it.title, it.fav ? h('span', { class: 'star' }, ' ★') : null),
         h('span', { class: 'row-sub' }, showCat ? [typeDef(it.type).label, itemSubtitle(it)].filter(Boolean).join(' · ') : itemSubtitle(it))),
       h('span', { class: 'row-badges' }, expiryTag(it), healthRing(it),
         it.files && it.files.length ? h('span', { class: 'row-att', title: 'Has files' }, icon('attach', 'ico ico-sm'), it.files.length) : null)),
-    quick && h('button', { class: 'icon-btn copy-btn', 'aria-label': 'Copy password', onclick: () => copy(quick, 'Password copied') }, 'Copy'));
+    quick && h('button', { class: 'icon-btn copy-btn', 'aria-label': 'Copy password', onclick: () => { if (!dragged) copy(quick, 'Password copied'); } }, 'Copy'));
+  const act = (cls, ic, label, fn) => h('button', { class: `swipe-act ${cls}`, 'aria-label': label, onclick: (e) => { e.stopPropagation(); fn(); } },
+    icon(ic, 'ico'), h('span', {}, label));
+  const actions = h('div', { class: 'swipe-actions' },
+    pw && act('sa-copy', 'copy', 'Copy', () => { copy(pw, 'Password copied'); closeSwipe(); }),
+    act('sa-fav', 'fav', it.fav ? 'Unstar' : 'Star', async () => { it.fav = !it.fav; closeSwipe(); render(); await save(); }),
+    act('sa-del', 'trash', 'Delete', async () => {
+      closeSwipe();
+      if (!(await confirmBox('Delete this item?', `“${it.title}” and any files attached to it will be removed from your vault.`, 'Delete', true))) return;
+      state.data.items = state.data.items.filter((x) => x.id !== it.id);
+      for (const att of it.files || []) await attRemove(att.id).catch(() => {});
+      render(); await save(); toast('Deleted');
+    }));
+  const li = h('li', { class: 'row-item swipe' }, actions, front);
+
+  let x0 = 0, y0 = 0, dx = 0, mode = null, base = 0, width = 0;
+  const place = (x, anim) => {
+    front.style.transition = actions.style.transition = anim ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none';
+    front.style.transform = x ? `translateX(${x}px)` : '';
+    actions.style.transform = `translateX(${width + x}px)`;
+  };
+  front.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    x0 = e.clientX; y0 = e.clientY; dx = 0; mode = null; dragged = false;
+    width = actions.offsetWidth; base = li.classList.contains('open') ? -width : 0;
+  });
+  front.addEventListener('pointermove', (e) => {
+    if (x0 === null) return;
+    const mx = e.clientX - x0, my = e.clientY - y0;
+    if (!mode) { if (Math.abs(mx) > 8 && Math.abs(mx) > Math.abs(my)) { mode = 'x'; if (openSwipe && !li.classList.contains('open')) closeSwipe(); } else if (Math.abs(my) > 8) mode = 'y'; }
+    if (mode !== 'x') return;
+    dragged = true; li.classList.add('swiping');
+    dx = Math.min(0, Math.max(-width - 30, base + mx));
+    place(dx, false);
+  });
+  const end = () => {
+    if (mode === 'x') {
+      const open = dx < -width / 2.5;
+      li.classList.toggle('open', open); li.classList.remove('swiping');
+      place(open ? -width : 0, true);
+      if (open) { buzz(6); openSwipe = () => { li.classList.remove('open'); place(0, true); }; }
+      else if (openSwipe && li.classList.contains('open') === false) openSwipe = null;
+      setTimeout(() => { dragged = false; }, 50);
+    } else if (li.classList.contains('open')) { dragged = true; closeSwipe(); setTimeout(() => { dragged = false; }, 50); }
+    x0 = null; mode = null;
+  };
+  front.addEventListener('pointerup', end);
+  front.addEventListener('pointercancel', end);
+  requestAnimationFrame(() => { width = actions.offsetWidth; actions.style.transform = `translateX(${width}px)`; });
+  return li;
+}
+
+// ---------- Search (pull down on the home screen) ----------
+function searchText(it) {
+  const parts = [it.title, typeDef(it.type).label, itemSubtitle(it)];
+  for (const [k, , kind = ''] of itemFields(it)) if (!kind.includes('secret') && it.fields[k]) parts.push(it.fields[k]);
+  return parts.join(' ').toLowerCase();
+}
+function openSearch() {
+  const results = h('div', { class: 'search-results' });
+  const input = h('input', { class: 'input search', id: 'pull-search', type: 'search', placeholder: 'Search everything', autocomplete: 'off', enterkeyhint: 'search' });
+  const draw = () => {
+    const q = input.value.trim().toLowerCase();
+    const items = state.data.items.slice().sort((a, b) => Math.max(b.used || 0, b.updated || 0) - Math.max(a.used || 0, a.updated || 0));
+    const rows = q ? items.filter((it) => searchText(it).includes(q)) : items.slice(0, 6);
+    results.replaceChildren(
+      h('p', { class: 'search-cap' }, q ? `${rows.length} result${rows.length === 1 ? '' : 's'}` : 'Recent'),
+      rows.length ? h('ul', { class: 'list' }, rows.slice(0, 40).map((it) => itemRow(it, { showCat: true, from: 'all' })))
+        : h('p', { class: 'muted center pad' }, 'Nothing matches.'));
+  };
+  input.addEventListener('input', draw);
+  draw();
+  modal('Search', h('div', { class: 'stack search-sheet' }, input, results), (close) => [h('button', { class: 'btn ghost', onclick: close }, 'Close')]);
+  setTimeout(() => input.focus(), 60);
+  try { localStorage.setItem('oy.pulled', '1'); } catch {}
 }
 
 function specialView(k) {
@@ -1552,32 +1771,41 @@ VIEWS.item = () => {
   if (!it) { setTimeout(() => go('vault')); return h('div'); }
   const def = typeDef(it.type);
   if (!it.used || Date.now() - it.used > 60000) { it.used = Date.now(); save(); } // for Recent
-  const fieldRows = def.fields.map(([k, label, kind = '']) => {
+  const fieldRows = itemFields(it).map(([k, label, kind = '']) => {
     const v = it.fields[k];
     if (!v) return null;
     const secret = kind.includes('secret');
     const multi = kind.includes('multi');
     const valEl = h(multi ? 'pre' : 'span', { class: `field-val ${secret ? 'masked' : ''}` }, secret ? '••••••••••' : v);
     let shown = !secret;
-    const actions = [];
-    if (secret) actions.push(h('button', { class: 'mini', onclick: (e) => {
+    const name = label.replace(/ \(.*\)$/, '');
+    const side = [];
+    if (secret) side.push(h('button', { class: 'eye-btn', 'aria-label': `Show ${name}`, onclick: (e) => {
+      e.stopPropagation();
       shown = !shown; valEl.textContent = shown ? v : '••••••••••'; valEl.classList.toggle('masked', !shown);
-      e.currentTarget.textContent = shown ? 'Hide' : 'Show';
-    } }, 'Show'));
-    actions.push(h('button', { class: 'mini', onclick: () => copy(v, `${label.replace(/ \(.*\)$/, '')} copied`) }, 'Copy'));
+      e.currentTarget.replaceChildren(icon(shown ? 'eyeOff' : 'eye', 'ico'));
+    } }, icon('eye', 'ico')));
     if (k === 'url') {
       const href = /^https?:\/\//i.test(v) ? v : `https://${v}`;
-      actions.push(h('a', { class: 'mini', href, target: '_blank', rel: 'noopener noreferrer' }, 'Open'));
+      side.push(h('a', { class: 'eye-btn', href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Open website', onclick: (e) => e.stopPropagation() }, icon('external', 'ico')));
     }
     const hl = k === passwordKey(it) ? healthRing(it, true) : null;
-    return h('div', { class: 'field' },
-      h('div', { class: 'field-label' }, label.replace(/ \(.*\)$/, ''), hl),
-      h('div', { class: 'field-body' }, valEl, h('div', { class: 'field-actions' }, actions)));
+    const row = h('div', { class: 'field tap', role: 'button', tabindex: '0', 'aria-label': `Copy ${name}`,
+      onclick: async () => {
+        await copy(v, `${name} copied`);
+        row.classList.remove('copied'); void row.offsetWidth; row.classList.add('copied');
+        setTimeout(() => row.classList.remove('copied'), 1400);
+      },
+      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); row.click(); } } },
+      h('div', { class: 'field-label' }, name, hl),
+      h('div', { class: 'field-body' }, valEl, h('div', { class: 'field-actions' }, side, h('span', { class: 'copy-mark', 'aria-hidden': 'true' }, icon('copy', 'ico ico-copy'), icon('check', 'ico ico-check')))));
+    return row;
   }).filter(Boolean);
   return h('div', { class: 'screen' },
     topBar(def.label, iconBtn('back', 'Back', () => go('category', { category: state.from || it.type })),
       h('button', { class: 'icon-btn text', onclick: () => go('edit', { draft: structuredClone(it) }) }, 'Edit')),
     h('div', { class: 'content' },
+      h('div', { class: 'item-hero', style: `--c:${COLOURS[typeIcon(it.type)] || 'var(--gold)'}` }),
       h('div', { class: 'item-head' },
         catIcon(typeIcon(it.type), 'ico item-icon'),
         h('div', {}, h('h1', {}, it.title), h('p', { class: 'muted small head-sub' }, `Updated ${new Date(it.updated || Date.now()).toLocaleDateString('en-AU')}`, expiryTag(it, true))),
@@ -1590,6 +1818,7 @@ VIEWS.item = () => {
       def.files && attachmentsBlock(it),
       !(def.files && it.mode === 'files') &&
         h('div', { class: 'card' }, fieldRows.length ? fieldRows : h('p', { class: 'muted pad' }, 'No details yet.')),
+      !(def.files && it.mode === 'files') && fieldRows.length > 0 && h('p', { class: 'tap-hint' }, 'Tap any detail to copy it'),
       h('button', { class: 'btn danger-outline', onclick: async () => {
         if (!(await confirmBox('Delete this item?', `“${it.title}” and any files attached to it will be removed from your vault.`, 'Delete', true))) return;
         state.data.items = state.data.items.filter((x) => x.id !== it.id);
@@ -1605,7 +1834,7 @@ VIEWS.edit = () => {
   const isNew = !findItem(d.id);
   const title = h('input', { class: 'input', id: 'f-title', placeholder: `Name (e.g. ${EXAMPLE_NAMES[d.type] || 'My ' + def.one})`, value: d.title, autocomplete: 'off' });
   const inputs = {};
-  const fieldEls = def.fields.map(([k, label, kind = '']) => {
+  const fieldEls = itemFields(d).map(([k, label, kind = '']) => {
     const secret = kind.includes('secret');
     const multi = kind.includes('multi');
     let control;
@@ -1623,7 +1852,8 @@ VIEWS.edit = () => {
     } else {
       control = h('input', { class: 'input', id: `f-${k}`, placeholder: label, value: d.fields[k] || '', autocomplete: 'off',
         inputmode: ['bsb', 'abn', 'acn', 'memberNumber'].includes(k) ? 'numeric' : null,
-        type: k === 'url' ? 'url' : k === 'address' ? 'email' : 'text' });
+        type: 'text', autocapitalize: ['url', 'address', 'username'].includes(k) ? 'off' : null,
+        ...(k === 'url' ? { inputmode: 'url' } : k === 'address' ? { inputmode: 'email' } : {}) });
       inputs[k] = control;
     }
     return h('label', { class: 'form-field' }, h('span', { class: 'field-label' }, label.replace(/ \(.*\)$/, '')), control);
@@ -1652,7 +1882,7 @@ VIEWS.edit = () => {
         isNew ? go('category', { category: d.type }) : go('item', { itemId: d.id });
       } }, 'Cancel'),
       null),
-    h('form', { class: 'content stack', onsubmit: submit },
+    h('form', { class: 'content stack', onsubmit: submit, novalidate: true },
       def.files && modeToggle(d.mode || 'details', (m) => {
         // keep what was typed so far, then redraw with the chosen mode
         d.title = title.value;
@@ -1664,7 +1894,7 @@ VIEWS.edit = () => {
       !(def.files && d.mode === 'files') && h('button', { type: 'button', class: 'btn link edit-fields', onclick: () => {
         d.title = title.value;
         for (const [k, el] of Object.entries(inputs)) d.fields[k] = el.value;
-        fieldEditor(d.type);
+        fieldEditor(d, () => render());
       } }, '+ Add, edit or delete fields'),
       def.files && draftAttachments(d),
       h('button', { class: 'btn gold big', type: 'submit' }, 'Save')));
@@ -1768,7 +1998,10 @@ VIEWS.settings = () => {
       section('Account',
         h('div', { class: 'setting-row static' }, h('span', {},
           h('span', { class: 'setting-label' }, isDrive() ? state.account.email : 'This device only'),
-          h('span', { class: 'setting-sub' }, isDrive() ? 'Vault stored encrypted in your Google Drive' : 'Vault stored encrypted on this device')))),
+          h('span', { class: 'setting-sub' }, isDrive() ? 'Vault stored encrypted in your Google Drive' : 'Vault stored encrypted on this device'))),
+        h('label', { class: 'setting-row static' }, h('span', { class: 'setting-label' }, 'Your name'),
+          h('input', { class: 'input name-input', id: 'set-name', value: prefs.name || '', placeholder: 'For the greeting', maxlength: 24, autocomplete: 'given-name',
+            onchange: async (e) => { prefs.name = e.target.value.trim(); await save(); toast('Saved'); } }))),
       section('Icons', iconStyleDropdown()),
       section('Look', (() => {
         const on = savedGlass();
