@@ -1500,7 +1500,8 @@ function vaultHealth(items = state.data.items) {
   const reused = pw.filter((x) => x.hl.label === 'Reused').map((x) => x.it);
   const okay = pw.filter((x) => x.hl.label === 'Okay').map((x) => x.it);
   const dated = items.filter((it) => expiryOf(it));
-  const expiring = expiringItems();
+  const inSet = new Set(items);
+  const expiring = expiringItems().filter((it) => inSet.has(it));
   const expired = expiring.filter((it) => expiryOf(it).status === 'expired');
   const checks = pw.length + dated.length;
   const bad = weak.length + reused.length + okay.length * 0.4 + expired.length + (expiring.length - expired.length) * 0.5;
@@ -1769,6 +1770,64 @@ let openSwipe = null;
 function closeSwipe() { if (openSwipe) { openSwipe(); openSwipe = null; } }
 document.addEventListener('pointerdown', (e) => { if (openSwipe && !e.target.closest('.row-item.open')) closeSwipe(); }, true);
 
+// ---------- Website and bank logos (optional, off by default) ----------
+// Logos are asked for directly from the bank's or website's own address — no third-party service.
+const BANKS = [
+  ['commbank.com.au', ['commbank', 'commonwealth bank', 'cba']], ['nab.com.au', ['nab', 'national australia bank']],
+  ['anz.com.au', ['anz']], ['westpac.com.au', ['westpac']], ['ing.com.au', ['ing']], ['macquarie.com.au', ['macquarie']],
+  ['stgeorge.com.au', ['st.george', 'st george', 'stgeorge']], ['bendigobank.com.au', ['bendigo']], ['ubank.com.au', ['ubank']],
+  ['up.com.au', ['up bank', 'up']], ['greatsouthernbank.com.au', ['great southern', 'gsb']], ['bankwest.com.au', ['bankwest']],
+  ['suncorp.com.au', ['suncorp']], ['boq.com.au', ['boq', 'bank of queensland']], ['hsbc.com.au', ['hsbc']],
+  ['bankofmelbourne.com.au', ['bank of melbourne']], ['banksa.com.au', ['banksa', 'bank sa']], ['mebank.com.au', ['me bank']],
+  ['bankaust.com.au', ['bank australia']], ['beyondbank.com.au', ['beyond bank']], ['newcastlepermanent.com.au', ['newcastle permanent']],
+  ['heritage.com.au', ['heritage bank']], ['peopleschoice.com.au', ['people\'s choice', 'peoples choice']], ['tmbank.com.au', ['teachers mutual']],
+  ['judo.bank', ['judo']], ['rabobank.com.au', ['rabobank']], ['americanexpress.com', ['amex', 'american express']],
+  ['citibank.com.au', ['citibank', 'citi']], ['latitudefinancial.com.au', ['latitude']], ['revolut.com', ['revolut']], ['wise.com', ['wise']],
+  ['paypal.com', ['paypal']], ['afterpay.com', ['afterpay']], ['zip.co', ['zip pay', 'zip money']],
+  ['flybuys.com.au', ['flybuys', 'fly buys']], ['woolworthsrewards.com.au', ['everyday rewards', 'woolworths rewards']],
+  ['qantas.com', ['qantas']], ['velocityfrequentflyer.com', ['velocity']], ['virginaustralia.com', ['virgin australia']],
+  ['coles.com.au', ['coles']], ['woolworths.com.au', ['woolworths']], ['myer.com.au', ['myer one', 'myer']], ['bunnings.com.au', ['bunnings']]
+];
+const MAIL = { 'gmail.com': 'mail.google.com', 'googlemail.com': 'mail.google.com', 'icloud.com': 'icloud.com', 'me.com': 'icloud.com',
+  'outlook.com': 'outlook.com', 'hotmail.com': 'outlook.com', 'live.com': 'outlook.com', 'yahoo.com': 'yahoo.com', 'bigpond.com': 'telstra.com.au' };
+function logosOn() { return !!(state.data && state.data.prefs.logos); }
+function bankDomain(text) {
+  const t = ` ${String(text || '').toLowerCase().replace(/[^a-z0-9.' ]+/g, ' ').replace(/\s+/g, ' ')} `;
+  for (const [d, names] of BANKS) if (names.some((n) => t.includes(` ${n} `))) return d;   // whole words only
+  return null;
+}
+function siteDomain(it) {
+  const f = it.fields || {};
+  const fromUrl = (v) => { try { return new URL(/^https?:/i.test(v) ? v : `https://${v}`).hostname.replace(/^www\./, ''); } catch { return null; } };
+  if (f.url && /\./.test(f.url)) return fromUrl(String(f.url).trim());
+  if (it.type === 'email') {
+    const dom = String(f.address || '').split('@')[1];
+    if (dom) return MAIL[dom.toLowerCase()] || dom.toLowerCase();
+    return bankDomain(f.provider);
+  }
+  if (['bank', 'card', 'rewards'].includes(it.type)) return bankDomain([f.bank, f.program, it.title].filter(Boolean).join(' '));
+  return null;
+}
+const logoMiss = new Set();     // sites with no logo this session (not saved anywhere)
+function logoEl(it, fallback, cls = 'site-logo') {
+  if (!logosOn()) return fallback;
+  const d = siteDomain(it);
+  if (!d || logoMiss.has(d)) return fallback;
+  const tries = [`https://${d}/apple-touch-icon.png`, `https://www.${d}/apple-touch-icon.png`, `https://${d}/favicon.ico`];
+  const wrap = h('span', { class: cls, 'aria-hidden': 'true' });
+  const img = h('img', { alt: '', referrerpolicy: 'no-referrer', decoding: 'async' });
+  let n = 0;
+  const next = () => {
+    if (n >= tries.length) { logoMiss.add(d); if (wrap.isConnected) wrap.replaceWith(fallback); return; }
+    img.src = tries[n++];
+  };
+  img.onerror = next;
+  img.onload = () => { if (img.naturalWidth < 16) next(); else wrap.classList.add('ok'); };
+  wrap.append(img);
+  next();
+  return wrap;
+}
+
 function rowLead(it, showCat) {
   const img = typeDef(it.type).files && (it.files || []).find((a) => a.type.startsWith('image/'));
   if (img) {
@@ -1779,7 +1838,8 @@ function rowLead(it, showCat) {
     }).catch(() => { t.replaceWith(showCat ? catIcon(typeIcon(it.type), 'ico row-cat') : avatar(it)); });
     return t;
   }
-  return showCat ? catIcon(typeIcon(it.type), 'ico row-cat') : avatar(it);
+  const plain = showCat ? catIcon(typeIcon(it.type), 'ico row-cat') : avatar(it);
+  return logoEl(it, plain);
 }
 
 function itemRow(it, { showCat = false, from = null } = {}) {
@@ -1940,7 +2000,7 @@ VIEWS.item = () => {
     h('div', { class: 'content' },
       h('div', { class: 'item-hero', style: `--c:${COLOURS[typeIcon(it.type)] || 'var(--gold)'}` }),
       h('div', { class: 'item-head' },
-        catIcon(typeIcon(it.type), 'ico item-icon'),
+        logoEl(it, catIcon(typeIcon(it.type), 'ico item-icon'), 'site-logo big'),
         h('div', {}, h('h1', {}, it.title), h('p', { class: 'muted small head-sub' }, `Updated ${new Date(it.updated || Date.now()).toLocaleDateString('en-AU')}`, expiryTag(it, true))),
         h('button', { class: `star-btn ${it.fav ? 'on' : ''}`, 'aria-label': 'Favourite', onclick: async () => {
           it.fav = !it.fav; render(); await save();
@@ -2146,6 +2206,13 @@ VIEWS.settings = () => {
           onclick: () => { setGlass(!on); render(); } }, h('span', { class: 'knob' }));
         return h('div', { class: 'setting-row static' },
           h('span', {}, h('span', { class: 'setting-label' }, 'Glass effect'), h('span', { class: 'setting-sub' }, 'See-through panels over a soft colour glow')), sw);
+      })(), (() => {
+        const on = logosOn();
+        const sw = h('button', { class: `switch ${on ? 'on' : ''}`, role: 'switch', 'aria-checked': String(on), 'aria-label': 'Show website logos',
+          onclick: async () => { prefs.logos = !on; render(); await save(); } }, h('span', { class: 'knob' }));
+        return h('div', { class: 'setting-row static' },
+          h('span', {}, h('span', { class: 'setting-label' }, 'Show website & bank logos'),
+            h('span', { class: 'setting-sub' }, 'Asks each website or bank for its own logo. They can see a logo was requested, but never your details.')), sw);
       })()),
       section('Theme', themeDropdown(),
         h('div', { class: 'setting-row static appearance-row' }, h('span', { class: 'setting-label' }, 'Appearance'),

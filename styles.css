@@ -990,3 +990,12 @@ body:not(.preview) .lift-inner .door-app { padding-top: var(--safe-top); }
 @keyframes factBar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 /* health card inside a category */
 .content > .health-strip { margin-top: -2px; }
+
+/* ---------- Website & bank logos ---------- */
+.site-logo { width: 38px; height: 38px; flex: none; border-radius: 11px; overflow: hidden; display: grid; place-items: center;
+  background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.08) inset, 0 3px 8px -4px rgba(0,0,0,.4); }
+.site-logo img { width: 100%; height: 100%; object-fit: contain; display: block; opacity: 0; transition: opacity .2s ease; }
+.site-logo.ok img { opacity: 1; }
+.site-logo:not(.ok) { background: var(--surface-2); }
+.site-logo.big { width: 56px; height: 56px; border-radius: 16px; }
+.site-logo.big img { padding: 0; }
