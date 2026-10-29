@@ -1696,7 +1696,8 @@ function homeHeader() {
 function healthCard(items, cat) {
   const vh = vaultHealth(items);
   if (!vh.checks) return null;
-  const bits = [vh.weak.length && `${vh.weak.length} weak`, vh.reused.length && `${vh.reused.length} reused`, vh.expiring.length && `${vh.expiring.length} expiring`].filter(Boolean);
+  const bits = [vh.weak.length && `${vh.weak.length} weak`, vh.reused.length && `${vh.reused.length} reused`, vh.expiring.length && `${vh.expiring.length} expiring`,
+    vh.okay.length && `${vh.okay.length} could be stronger`].filter(Boolean);
   return h('button', { class: `health-strip ${vh.score >= 80 ? 'good' : vh.score >= 50 ? 'mid' : 'bad'}`,
     onclick: () => go('category', { category: 'health', healthCat: cat, healthTab: null, from: null }) },
     scoreRing(vh.score, 30),
@@ -1968,6 +1969,32 @@ const BANKS = [
   ['qantas.com', ['qantas']], ['velocityfrequentflyer.com', ['velocity']], ['virginaustralia.com', ['virgin australia']],
   ['coles.com.au', ['coles']], ['woolworths.com.au', ['woolworths']], ['myer.com.au', ['myer one', 'myer']], ['bunnings.com.au', ['bunnings']]
 ];
+// Well-known services, matched by the item's name when no website is saved
+const SERVICES = [
+  ['apple.com', ['apple id', 'apple', 'icloud', 'itunes', 'app store']], ['google.com', ['google', 'google account']], ['mail.google.com', ['gmail']],
+  ['youtube.com', ['youtube']], ['microsoft.com', ['microsoft', 'office 365', 'microsoft 365']], ['outlook.com', ['outlook', 'hotmail']], ['xbox.com', ['xbox']],
+  ['amazon.com.au', ['amazon']], ['netflix.com', ['netflix']], ['spotify.com', ['spotify']], ['disneyplus.com', ['disney+', 'disney plus', 'disney']],
+  ['stan.com.au', ['stan']], ['binge.com.au', ['binge']], ['kayosports.com.au', ['kayo']], ['foxtel.com.au', ['foxtel']], ['primevideo.com', ['prime video']],
+  ['facebook.com', ['facebook', 'meta']], ['instagram.com', ['instagram']], ['whatsapp.com', ['whatsapp']], ['x.com', ['twitter', 'x']],
+  ['linkedin.com', ['linkedin']], ['tiktok.com', ['tiktok']], ['snapchat.com', ['snapchat']], ['reddit.com', ['reddit']],
+  ['uber.com', ['uber', 'uber eats']], ['doordash.com', ['doordash']], ['menulog.com.au', ['menulog']], ['airbnb.com', ['airbnb']],
+  ['ebay.com.au', ['ebay']], ['my.gov.au', ['mygov', 'my gov']], ['ato.gov.au', ['ato', 'tax office']], ['service.nsw.gov.au', ['service nsw']],
+  ['servicesaustralia.gov.au', ['centrelink', 'services australia', 'medicare online']], ['transportnsw.info', ['opal', 'transport nsw']],
+  ['linkt.com.au', ['linkt', 'e-toll', 'etoll']], ['telstra.com.au', ['telstra']], ['optus.com.au', ['optus']], ['vodafone.com.au', ['vodafone']],
+  ['tpg.com.au', ['tpg']], ['aussiebroadband.com.au', ['aussie broadband']], ['agl.com.au', ['agl']], ['originenergy.com.au', ['origin', 'origin energy']],
+  ['energyaustralia.com.au', ['energyaustralia', 'energy australia']], ['sydneywater.com.au', ['sydney water']], ['hesta.com.au', ['hesta']],
+  ['australiansuper.com', ['australiansuper', 'australian super']], ['art.com.au', ['australian retirement trust']], ['kmart.com.au', ['kmart']],
+  ['officeworks.com.au', ['officeworks']], ['jbhifi.com.au', ['jb hi-fi', 'jb hifi']], ['harveynorman.com.au', ['harvey norman']],
+  ['github.com', ['github']], ['zoom.us', ['zoom']], ['dropbox.com', ['dropbox']], ['canva.com', ['canva']], ['chatgpt.com', ['chatgpt', 'openai']],
+  ['claude.ai', ['claude']], ['xero.com', ['xero']], ['myob.com', ['myob']], ['seek.com.au', ['seek']], ['realestate.com.au', ['realestate']],
+  ['domain.com.au', ['domain.com.au']], ['nrma.com.au', ['nrma']], ['aami.com.au', ['aami']], ['budgetdirect.com.au', ['budget direct']],
+  ['bupa.com.au', ['bupa']], ['medibank.com.au', ['medibank']], ['hcf.com.au', ['hcf']], ['nib.com.au', ['nib']], ['ahm.com.au', ['ahm']]
+];
+function serviceDomain(text) {
+  const t = ` ${String(text || '').toLowerCase().replace(/[^a-z0-9.+' -]+/g, ' ').replace(/\s+/g, ' ')} `;
+  for (const [d, names] of SERVICES) if (names.some((n) => t.includes(` ${n} `))) return d;
+  return null;
+}
 const MAIL = { 'gmail.com': 'mail.google.com', 'googlemail.com': 'mail.google.com', 'icloud.com': 'icloud.com', 'me.com': 'icloud.com',
   'outlook.com': 'outlook.com', 'hotmail.com': 'outlook.com', 'live.com': 'outlook.com', 'yahoo.com': 'yahoo.com', 'bigpond.com': 'telstra.com.au' };
 function logosOn() { return !!(state.data && state.data.prefs.logos); }
@@ -1983,9 +2010,10 @@ function siteDomain(it) {
   if (it.type === 'email') {
     const dom = String(f.address || '').split('@')[1];
     if (dom) return MAIL[dom.toLowerCase()] || dom.toLowerCase();
-    return bankDomain(f.provider);
+    return serviceDomain(f.provider) || serviceDomain(it.title);
   }
   if (['bank', 'card', 'rewards'].includes(it.type)) return bankDomain([f.bank, f.program, it.title].filter(Boolean).join(' '));
+  if (['login', 'note', 'wifi', 'taxid', 'document'].includes(it.type) || !TYPES[it.type]) return serviceDomain(it.title) || bankDomain(it.title);
   return null;
 }
 const logoMiss = new Set();     // sites with no logo this session (not saved anywhere)
