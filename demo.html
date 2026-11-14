@@ -2893,31 +2893,41 @@ function modeToggle(current, onChange) {
 const SHORT = { login: 'Logins', email: 'Email', passport: 'Passports', medicare: 'Medicare', card: 'Cards', bank: 'Bank',
   rewards: 'Rewards', licence: 'Licences', taxid: 'Tax IDs', wifi: 'Wi‑Fi', note: 'Notes', document: 'Documents', more: 'More' };
 
-// Folders moved from More onto the home screen (prefs.pinned holds their keys)
-function pinnedKeys() {
-  const pinned = (state.data && state.data.prefs.pinned) || [];
-  return pinned.filter((k) => k === 'document' || customCats().some((c) => c.id === k));
+// Every folder (built-in types and custom categories) can sit on the home screen or in More.
+// prefs.loc[key] = 'home' | 'more' records a move; without one, built-in types start on home and
+// Other documents and custom categories start in More.
+function allFolderKeys() {
+  return [...TYPE_KEYS, ...customCats().map((c) => c.id)];
+}
+function onHome(k) {
+  const loc = (state.data && state.data.prefs.loc) || {};
+  if (loc[k]) return loc[k] === 'home';
+  const pinned = (state.data && state.data.prefs.pinned) || [];   // earlier version of the same move
+  if (pinned.includes(k)) return true;
+  return k !== 'document' && !customCats().some((c) => c.id === k);
 }
 function allHomeKeys() {
-  return [...HOME_KEYS.filter((k) => k !== 'more'), ...pinnedKeys(), 'more'];
+  return [...HOME_KEYS.filter((k) => k !== 'more' && (!allFolderKeys().includes(k) || onHome(k))), ...allFolderKeys().filter((k) => !HOME_KEYS.includes(k) && onHome(k)), 'more'];
 }
 function tileIcon(k) {
   if (TYPES[k] || SPECIAL[k] || k === 'more') return k;
   return baseDef(k).icon || 'folder';
 }
-async function togglePin(k) {
-  const pinned = pinnedKeys();
-  if (pinned.includes(k)) {
-    state.data.prefs.pinned = pinned.filter((x) => x !== k);
-    state.data.prefs.order = homeOrder().filter((x) => x !== k);
-    if (state.arranging) state.arranging = state.arranging.filter((x) => x !== k);
-  } else {
-    state.data.prefs.pinned = [...pinned, k];
-    // new home tile sits just before More
-    const ord = homeOrder().filter((x) => x !== k);
+// Move a folder to the home screen (on = true) or into More (on = false)
+async function setOnHome(k, on) {
+  state.data.prefs.loc = { ...(state.data.prefs.loc || {}), [k]: on ? 'home' : 'more' };
+  if (state.data.prefs.pinned) state.data.prefs.pinned = state.data.prefs.pinned.filter((x) => x !== k);
+  const ord = homeOrder().filter((x) => x !== k);
+  if (on) {
+    // a new home tile sits just before More
     const at = ord.indexOf('more');
     ord.splice(at < 0 ? ord.length : at, 0, k);
-    state.data.prefs.order = ord;
+  }
+  state.data.prefs.order = ord;
+  if (state.arranging) {
+    const arr = state.arranging.filter((x) => x !== k);
+    if (on) { const at = arr.indexOf('more'); arr.splice(at < 0 ? arr.length : at, 0, k); }
+    state.arranging = arr;
   }
   render();
   await save();
@@ -2961,11 +2971,11 @@ VIEWS.vault = () => {
       oncontextmenu: (e) => e.preventDefault()
     }, h('span', { class: 'home-icon', style: `--c:${COLOURS[k] || COLOURS[tileIcon(k)] || '#A16207'}` }, catIcon(tileIcon(k), 'ico ico-home', { onTile: true }),
         counts[k] ? h('span', { class: 'home-badge' }, counts[k] > 99 ? '99+' : counts[k]) : null,
-        // while arranging, a folder moved here can go back to More (the tap must not start a drag)
-        arranging && pinnedKeys().includes(k) && h('span', { class: 'home-unpin', role: 'button', tabindex: '0', 'aria-label': `Move ${typeDef(k).label} back to More`,
-          title: 'Move back to More',
+        // while arranging, any folder on the home screen can be moved into More (the tap must not start a drag)
+        arranging && allFolderKeys().includes(k) && h('span', { class: 'home-unpin', role: 'button', tabindex: '0', 'aria-label': `Move ${typeDef(k).label} to More`,
+          title: 'Move to More',
           onpointerdown: (e) => e.stopPropagation(),
-          onclick: (e) => { e.stopPropagation(); togglePin(k); toast(`${typeDef(k).label} moved to More`); } }, '−')),
+          onclick: (e) => { e.stopPropagation(); setOnHome(k, false); toast(`${typeDef(k).label} moved to More`); } }, '−')),
       h('span', { class: 'home-label' }, k === 'more' ? 'More' : SPECIAL[k] || (listView || !SHORT[k] ? typeDef(k).label : SHORT[k])),
       h('span', { class: 'home-count' }, counts[k] || ''), h('span', { class: 'home-chev' }, '›'));
     return el;
@@ -3219,16 +3229,16 @@ function openMore() {
       ic === 'plus' ? icon(ic, 'ico more-ico') : catIcon(ic, 'ico more-ico'), h('span', { class: 'more-label' }, label),
       k ? h('span', { class: 'more-count' }, count(k) || '') : null);
     if (!k) return h('div', { class: `more-row-wrap ${cls}` }, main);
-    const on = pinnedKeys().includes(k);
-    const pin = h('button', { class: 'more-pin', 'aria-pressed': String(on), 'aria-label': `${on ? 'Remove' : 'Add'} ${label} ${on ? 'from' : 'to'} home screen`,
-      onclick: () => { close(); togglePin(k); } }, on ? 'Remove from home' : 'Add to home');
+    const pin = h('button', { class: 'more-pin', 'aria-label': `Add ${label} to home screen`,
+      onclick: () => { close(); setOnHome(k, true); } }, 'Add to home');
     return h('div', { class: 'more-row-wrap' }, main, pin);
   };
+  // every folder that is not on the home screen: Other documents, custom categories and any built-in type moved here
+  const inMore = allFolderKeys().filter((k) => !onHome(k))
+    .sort((a, b) => (a === 'document' ? -1 : b === 'document' ? 1 : typeDef(a).label.localeCompare(typeDef(b).label)));
   const close = modal('More', h('div', { class: 'more-list' },
     row(null, 'Add new', 'plus', () => { close(); categoryEditor(); }, 'more-add'),
-    row('document', 'Other documents', 'document', () => { close(); go('category', { category: 'document' }); }),
-    customCats().slice().sort((a, b) => a.label.localeCompare(b.label))
-      .map((c) => row(c.id, c.label, c.icon, () => { close(); go('category', { category: c.id }); }))),
+    inMore.map((k) => row(k, typeDef(k).label, tileIcon(k), () => { close(); go('category', { category: k }); }))),
   (c) => [h('button', { class: 'btn ghost', onclick: c }, 'Close')]);
 }
 
@@ -3265,7 +3275,9 @@ async function deleteCategory(c) {
   for (const it of items) for (const id of attIdsOf(it)) await attRemove(id).catch(() => {});
   state.data.items = state.data.items.filter((it) => it.type !== c.id);
   state.data.prefs.custom = customCats().filter((x) => x.id !== c.id);
-  state.data.prefs.pinned = pinnedKeys().filter((x) => x !== c.id);
+  const { [c.id]: _gone, ...loc } = state.data.prefs.loc || {};
+  state.data.prefs.loc = loc;
+  state.data.prefs.pinned = ((state.data.prefs.pinned) || []).filter((x) => x !== c.id);
   go('vault'); await save(); toast('Category deleted');
 }
 
