@@ -869,6 +869,9 @@ body.is-home .home-grid.as-list { grid-template-rows: repeat(var(--rows, 12), mi
 
 /* ---------- Count badges ---------- */
 .home-tile.has .home-icon::after { display: none; }
+.home-unpin { position: absolute; top: 4%; left: 4%; width: 22px; height: 22px; border-radius: 50%; z-index: 3; display: grid; place-items: center;
+  background: var(--surface-2); color: var(--fg); border: 1px solid var(--line); box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  font: 700 1.1rem/1 var(--font-body); cursor: pointer; }
 .home-badge { position: absolute; top: 7%; right: 7%; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; z-index: 2;
   display: grid; place-items: center; font: 700 .68rem/1 var(--font-body); font-variant-numeric: tabular-nums;
   background: var(--gold); color: var(--on-gold); box-shadow: 0 2px 6px rgba(0,0,0,.35); }

@@ -1341,6 +1341,7 @@ async function togglePin(k) {
   if (pinned.includes(k)) {
     state.data.prefs.pinned = pinned.filter((x) => x !== k);
     state.data.prefs.order = homeOrder().filter((x) => x !== k);
+    if (state.arranging) state.arranging = state.arranging.filter((x) => x !== k);
   } else {
     state.data.prefs.pinned = [...pinned, k];
     // new home tile sits just before More
@@ -1390,7 +1391,12 @@ VIEWS.vault = () => {
       onpointerleave: () => clearTimeout(pressTimer),
       oncontextmenu: (e) => e.preventDefault()
     }, h('span', { class: 'home-icon', style: `--c:${COLOURS[k] || COLOURS[tileIcon(k)] || '#A16207'}` }, catIcon(tileIcon(k), 'ico ico-home', { onTile: true }),
-        counts[k] ? h('span', { class: 'home-badge' }, counts[k] > 99 ? '99+' : counts[k]) : null),
+        counts[k] ? h('span', { class: 'home-badge' }, counts[k] > 99 ? '99+' : counts[k]) : null,
+        // while arranging, a folder moved here can go back to More (the tap must not start a drag)
+        arranging && pinnedKeys().includes(k) && h('span', { class: 'home-unpin', role: 'button', tabindex: '0', 'aria-label': `Move ${typeDef(k).label} back to More`,
+          title: 'Move back to More',
+          onpointerdown: (e) => e.stopPropagation(),
+          onclick: (e) => { e.stopPropagation(); togglePin(k); toast(`${typeDef(k).label} moved to More`); } }, '−')),
       h('span', { class: 'home-label' }, k === 'more' ? 'More' : SPECIAL[k] || (listView || !SHORT[k] ? typeDef(k).label : SHORT[k])),
       h('span', { class: 'home-count' }, counts[k] || ''), h('span', { class: 'home-chev' }, '›'));
     return el;
