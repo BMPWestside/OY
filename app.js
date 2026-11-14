@@ -1324,16 +1324,47 @@ function modeToggle(current, onChange) {
 const SHORT = { login: 'Logins', email: 'Email', passport: 'Passports', medicare: 'Medicare', card: 'Cards', bank: 'Bank',
   rewards: 'Rewards', licence: 'Licences', taxid: 'Tax IDs', wifi: 'Wi‑Fi', note: 'Notes', document: 'Documents', more: 'More' };
 
+// Folders moved from More onto the home screen (prefs.pinned holds their keys)
+function pinnedKeys() {
+  const pinned = (state.data && state.data.prefs.pinned) || [];
+  return pinned.filter((k) => k === 'document' || customCats().some((c) => c.id === k));
+}
+function allHomeKeys() {
+  return [...HOME_KEYS.filter((k) => k !== 'more'), ...pinnedKeys(), 'more'];
+}
+function tileIcon(k) {
+  if (TYPES[k] || SPECIAL[k] || k === 'more') return k;
+  return baseDef(k).icon || 'folder';
+}
+async function togglePin(k) {
+  const pinned = pinnedKeys();
+  if (pinned.includes(k)) {
+    state.data.prefs.pinned = pinned.filter((x) => x !== k);
+    state.data.prefs.order = homeOrder().filter((x) => x !== k);
+  } else {
+    state.data.prefs.pinned = [...pinned, k];
+    // new home tile sits just before More
+    const ord = homeOrder().filter((x) => x !== k);
+    const at = ord.indexOf('more');
+    ord.splice(at < 0 ? ord.length : at, 0, k);
+    state.data.prefs.order = ord;
+  }
+  render();
+  await save();
+}
+
 function homeOrder() {
-  const saved = (state.data.prefs.order || []).filter((k) => HOME_KEYS.includes(k));
-  const missing = HOME_KEYS.filter((k) => !saved.includes(k));
+  const keys = allHomeKeys();
+  const saved = (state.data.prefs.order || []).filter((k) => keys.includes(k));
+  const missing = keys.filter((k) => !saved.includes(k));
   return [...missing.filter((k) => SPECIAL[k] && k !== 'expiring'), ...saved, ...missing.filter((k) => !SPECIAL[k])];
 }
 
 VIEWS.vault = () => {
   const counts = {};
+  const homeKeys = allHomeKeys();
   state.data.items.forEach((it) => {
-    const key = HOME_KEYS.includes(it.type) ? it.type : 'more';
+    const key = homeKeys.includes(it.type) ? it.type : 'more';
     counts[key] = (counts[key] || 0) + 1;
   });
   counts.all = state.data.items.length;
@@ -1346,7 +1377,7 @@ VIEWS.vault = () => {
     let pressTimer;
     const el = h('button', {
       class: `home-tile ${counts[k] ? 'has' : ''} ${arranging ? 'wiggle' : ''}`, 'data-key': k, style: `--n:${n || 0}`,
-      'aria-label': `${k === 'more' ? 'More' : SPECIAL[k] || TYPES[k].label}${counts[k] ? `, ${counts[k]} saved` : ''}`,
+      'aria-label': `${k === 'more' ? 'More' : SPECIAL[k] || typeDef(k).label}${counts[k] ? `, ${counts[k]} saved` : ''}`,
       onclick: () => {
         if (!state.arranging && !el.dataset.longpressed) { if (k === 'more') openMore(); else go('category', { category: k, from: null, query: '' }); }
         delete el.dataset.longpressed;
@@ -1358,9 +1389,9 @@ VIEWS.vault = () => {
       onpointerup: () => clearTimeout(pressTimer),
       onpointerleave: () => clearTimeout(pressTimer),
       oncontextmenu: (e) => e.preventDefault()
-    }, h('span', { class: 'home-icon', style: `--c:${COLOURS[k]}` }, catIcon(k, 'ico ico-home', { onTile: true }),
+    }, h('span', { class: 'home-icon', style: `--c:${COLOURS[k] || COLOURS[tileIcon(k)] || '#A16207'}` }, catIcon(tileIcon(k), 'ico ico-home', { onTile: true }),
         counts[k] ? h('span', { class: 'home-badge' }, counts[k] > 99 ? '99+' : counts[k]) : null),
-      h('span', { class: 'home-label' }, k === 'more' ? 'More' : SPECIAL[k] || (listView ? TYPES[k].label : SHORT[k])),
+      h('span', { class: 'home-label' }, k === 'more' ? 'More' : SPECIAL[k] || (listView || !SHORT[k] ? typeDef(k).label : SHORT[k])),
       h('span', { class: 'home-count' }, counts[k] || ''), h('span', { class: 'home-chev' }, '›'));
     return el;
   };
@@ -1404,7 +1435,7 @@ VIEWS.vault = () => {
     !arranging && h('button', { class: 'sync-bar', hidden: !(isDrive() && !S.hasToken()), onclick: reconnectDrive },
       icon('recent', 'ico'), h('span', {}, 'Sync paused — tap to reconnect Google Drive')),
     grid,
-    arranging && h('button', { class: 'btn link subtle reset-order', onclick: () => { state.arranging = [...HOME_KEYS]; render(); } }, 'Reset to original order'));
+    arranging && h('button', { class: 'btn link subtle reset-order', onclick: () => { state.arranging = allHomeKeys(); render(); } }, 'Reset to original order'));
 };
 function homeView() {
   if (state.data && state.data.prefs.homeView) return state.data.prefs.homeView;
@@ -1607,9 +1638,17 @@ function fieldEditor(d, onDone) {
 // ---------- More: add your own categories ----------
 function openMore() {
   const count = (k) => state.data.items.filter((it) => it.type === k).length;
-  const row = (k, label, ic, onclick, cls = '') => h('button', { class: `more-row ${cls}`, onclick },
-    ic === 'plus' ? icon(ic, 'ico more-ico') : catIcon(ic, 'ico more-ico'), h('span', { class: 'more-label' }, label),
-    k ? h('span', { class: 'more-count' }, count(k) || '') : null);
+  // A folder can be moved onto the home screen with its own button, and moved back from there
+  const row = (k, label, ic, onclick, cls = '') => {
+    const main = h('button', { class: `more-row ${cls}`, onclick },
+      ic === 'plus' ? icon(ic, 'ico more-ico') : catIcon(ic, 'ico more-ico'), h('span', { class: 'more-label' }, label),
+      k ? h('span', { class: 'more-count' }, count(k) || '') : null);
+    if (!k) return h('div', { class: `more-row-wrap ${cls}` }, main);
+    const on = pinnedKeys().includes(k);
+    const pin = h('button', { class: 'more-pin', 'aria-pressed': String(on), 'aria-label': `${on ? 'Remove' : 'Add'} ${label} ${on ? 'from' : 'to'} home screen`,
+      onclick: () => { close(); togglePin(k); } }, on ? 'Remove from home' : 'Add to home');
+    return h('div', { class: 'more-row-wrap' }, main, pin);
+  };
   const close = modal('More', h('div', { class: 'more-list' },
     row(null, 'Add new', 'plus', () => { close(); categoryEditor(); }, 'more-add'),
     row('document', 'Other documents', 'document', () => { close(); go('category', { category: 'document' }); }),
@@ -1651,6 +1690,7 @@ async function deleteCategory(c) {
   for (const it of items) for (const id of attIdsOf(it)) await attRemove(id).catch(() => {});
   state.data.items = state.data.items.filter((it) => it.type !== c.id);
   state.data.prefs.custom = customCats().filter((x) => x.id !== c.id);
+  state.data.prefs.pinned = pinnedKeys().filter((x) => x !== c.id);
   go('vault'); await save(); toast('Category deleted');
 }
 

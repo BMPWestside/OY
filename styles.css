@@ -405,6 +405,12 @@ body.is-home .reset-order { flex: none; margin: 0 0 10px; }
 .more-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 0; border-top: 1px solid var(--line); background: var(--surface-2); cursor: pointer; text-align: left; }
 .more-row:first-child { border-top: 0; }
 @media (hover: hover) { .more-row:hover { background: var(--surface); } }
+.more-row-wrap { display: flex; align-items: stretch; border-top: 1px solid var(--line); background: var(--surface-2); }
+.more-row-wrap:first-child { border-top: 0; }
+.more-row-wrap > .more-row { flex: 1; min-width: 0; border-top: 0; background: transparent; }
+.more-row-wrap:has(.more-row:hover) { background: var(--surface); }
+.more-pin { flex: none; align-self: center; margin-right: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--gold); font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.more-pin[aria-pressed="true"] { color: var(--muted); }
 .more-ico { color: var(--gold); width: 24px; height: 24px; }
 .more-label { flex: 1; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .more-count { color: var(--muted); font-size: .85rem; }
